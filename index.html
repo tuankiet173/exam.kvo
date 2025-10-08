@@ -1025,7 +1025,10 @@
             async function handleAuthClick() {
                 tokenClient.callback = async (resp) => {
                     if (resp.error !== undefined) {
-                        throw (resp);
+                        const errorDetails = resp.error_description || JSON.stringify(resp);
+                        alert(`Đã xảy ra lỗi khi đăng nhập:\n\n${errorDetails}`);
+                        console.error("Authentication error:", resp);
+                        return;
                     }
                     await initializeAdminSession();
                 };
@@ -1097,6 +1100,8 @@
                     if (err.status === 404) {
                         appState.exams = [];
                         await saveData(); // Create a new empty file
+                    } else {
+                        throw err; // Re-throw other errors to be caught by the caller
                     }
                  }
                  renderAdminExamList();
@@ -1104,9 +1109,11 @@
             }
             
             async function initializeAdminSession() {
+                // Change view FIRST
                 appState.currentRole = 'admin';
                 showView('admin');
-                
+                renderAdminExamList();
+
                 try {
                     const userResponse = await gapi.client.request({
                         path: 'https://www.googleapis.com/oauth2/v3/userinfo'
@@ -1120,7 +1127,7 @@
                     await loadDriveData();
                 } catch (err) {
                     console.error("Error during admin session initialization:", err);
-                    const errorDetails = err.result ? err.result.error.message : (err.message || "Không có thông tin chi tiết.");
+                    const errorDetails = (err && err.result && err.result.error && err.result.error.message) ? err.result.error.message : (err ? (err.message || JSON.stringify(err)) : "Không có thông tin chi tiết.");
                     alert(`Đã xảy ra lỗi khi kết nối với Google Drive:\n\n${errorDetails}\n\nVui lòng thử đăng xuất và đăng nhập lại.`);
                     showApiStatus("Lỗi kết nối Drive", true);
                 }
