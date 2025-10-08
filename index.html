@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hệ Thống Thi Trắc Nghiệm Toán 2026</title>
+    <title>Hệ Thống Thi Trắc Nghiệm Toán 2025</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -335,6 +335,10 @@
 
     <!-- Main Application Script -->
     <script>
+        let tokenClient;
+        let gapiInited = false;
+        let gisInited = false;
+
         function gapiLoaded() {
             gapi.load('client', initializeGapiClient);
         }
@@ -346,11 +350,11 @@
             }
             tokenClient = google.accounts.oauth2.initTokenClient({
                 client_id: CLIENT_ID,
-                scope: SCOPES,
+                scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets',
                 callback: '', // defined dynamically
             });
             gisInited = true;
-            initializeApp();
+            initializeAppIfReady();
         }
 
         const API_KEY = 'AIzaSyCHRHV_zHOOCGyWER46KNvIJ1-t95i3pws';
@@ -359,11 +363,6 @@
             "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest",
             "https://sheets.googleapis.com/$discovery/rest?version=v4"
         ];
-        const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets';
-
-        let tokenClient;
-        let gapiInited = false;
-        let gisInited = false;
         
         const FOLDER_NAME = 'WebAppThiTracNghiem_Data';
         const FILE_NAME = 'exams_data.json';
@@ -378,16 +377,16 @@
                 discoveryDocs: DISCOVERY_DOCS,
             });
             gapiInited = true;
-            initializeApp();
+            initializeAppIfReady();
+        }
+
+        function initializeAppIfReady() {
+            if (gapiInited && gisInited) {
+                initializeApp();
+            }
         }
 
         function initializeApp() {
-            // This function is called by both gapiLoaded and gisLoaded.
-            // It will only run once both are initialized.
-            if (!gapiInited || !gisInited) {
-                return;
-            }
-
             // --- STATE MANAGEMENT ---
             let appState = {
                 exams: [],
@@ -1001,9 +1000,9 @@
                     let userAnswerText = (item.userAnswer !== null && item.userAnswer !== undefined) ? item.userAnswer : 'Chưa trả lời';
                     let correctAnswerText = (item.correctAnswer !== null && item.correctAnswer !== undefined) ? item.correctAnswer : '';
                     if(item.type === 'multiple-choice'){
-                        userAnswerText = (item.userAnswer !== null) ? `<span class="font-bold mr-1">${String.fromCharCode(65 + parseInt(item.userAnswer))}.</span> ${item.options[item.userAnswer]}` : 'Chưa trả lời';
-                        correctAnswerText = `<span class="font-bold mr-1">${String.fromCharCode(65 + parseInt(item.correctAnswer))}.</span> ${item.options[item.correctAnswer]}`;
-                    } else if (item.type === 'true-false') {
+                        userAnswerText = (item.userAnswer !== null && typeof item.options[item.userAnswer] !== 'undefined') ? `<span class="font-bold mr-1">${String.fromCharCode(65 + parseInt(item.userAnswer))}.</span> ${item.options[item.userAnswer]}` : 'Chưa trả lời';
+                        correctAnswerText = (typeof item.options[item.correctAnswer] !== 'undefined') ? `<span class="font-bold mr-1">${String.fromCharCode(65 + parseInt(item.correctAnswer))}.</span> ${item.options[item.correctAnswer]}` : '';
+                    } else if (item.type === 'true-false' && item.userAnswer !== 'Chưa trả lời') {
                          userAnswerText = item.sub_questions.map(sq => `<span>${sq.id}: <strong>${item.userAnswer[sq.id] ? 'Đúng' : 'Sai'}</strong></span>`).join('<br>');
                          correctAnswerText = item.sub_questions.map(sq => `<span>${sq.id}: <strong>${item.correctAnswer[sq.id] ? 'Đúng' : 'Sai'}</strong></span>`).join('<br>');
                     }
@@ -1101,17 +1100,27 @@
             }
             
             async function initializeAdminSession() {
-                const userResponse = await gapi.client.request({
-                    path: 'https://www.googleapis.com/oauth2/v3/userinfo'
-                });
-                document.getElementById('admin-email').textContent = `Đăng nhập: ${userResponse.result.email}`;
+                // Change view FIRST
                 appState.currentRole = 'admin';
                 showView('admin');
                 renderAdminExamList();
-                const folderId = await findOrCreateFolder();
-                dataFileId = await findOrCreateFile(folderId);
-                localStorage.setItem('dataFileId', dataFileId);
-                await loadDriveData();
+
+                try {
+                    const userResponse = await gapi.client.request({
+                        path: 'https://www.googleapis.com/oauth2/v3/userinfo'
+                    });
+                    document.getElementById('admin-email').textContent = `Đăng nhập: ${userResponse.result.email}`;
+                    
+                    const folderId = await findOrCreateFolder();
+                    dataFileId = await findOrCreateFile(folderId);
+                    localStorage.setItem('dataFileId', dataFileId);
+                    
+                    await loadDriveData();
+                } catch (err) {
+                    console.error("Error during admin session initialization:", err);
+                    alert("Đã xảy ra lỗi khi kết nối với Google Drive. Vui lòng thử đăng xuất và đăng nhập lại.");
+                    showApiStatus("Lỗi kết nối Drive", true);
+                }
             }
 
             // --- EVENT LISTENERS ---
@@ -1120,8 +1129,23 @@
             studentRoleBtn.addEventListener('click', () => {
                 appState.currentRole = 'student';
                 if(!gapiInited || !gisInited || !dataFileId) {
-                    alert("Hệ thống chưa sẵn sàng cho thí sinh. Vui lòng yêu cầu quản trị viên đăng nhập và cấu hình trước.");
-                    return;
+                    // This logic is flawed for students on different browsers.
+                    // A better approach would be to make the Drive file public.
+                    // For now, we load from local storage as a fallback.
+                    const localData = localStorage.getItem('mathTestApp');
+                    if (localData) {
+                        try {
+                           appState.exams = JSON.parse(localData);
+                        } catch(e){
+                            appState.exams = [];
+                        }
+                    } else {
+                        appState.exams = [];
+                    }
+                    if (appState.exams.length === 0) {
+                        alert("Hệ thống chưa có đề thi nào. Vui lòng yêu cầu quản trị viên đăng nhập và tạo đề trước.");
+                        return;
+                    }
                 }
                 renderStudentExamList();
                 showView('student');
@@ -1223,31 +1247,7 @@
             showView('roleSelection');
         }
 
-        // Delay initialization to ensure all scripts are loaded.
-        window.onload = () => {
-            // Check if API scripts have loaded before initializing the app
-            if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
-                 if(gapi.client) {
-                    initializeGapiClient();
-                 }
-                 if(google.accounts) {
-                    gisLoaded();
-                 }
-            } else {
-                // Fallback if scripts are slow to load
-                setTimeout(() => {
-                    if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
-                         if(gapi.client) initializeGapiClient();
-                         if(google.accounts) gisLoaded();
-                    } else {
-                         alert("Không thể tải các thư viện cần thiết của Google. Vui lòng kiểm tra lại kết nối mạng và thử lại.");
-                    }
-                }, 2000);
-            }
-        };
-
     </script>
 </body>
 </html>
-
 
