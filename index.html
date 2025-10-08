@@ -338,6 +338,7 @@
         let tokenClient;
         let gapiInited = false;
         let gisInited = false;
+        let domReady = false;
 
         function gapiLoaded() {
             gapi.load('client', initializeGapiClient);
@@ -345,9 +346,8 @@
 
         function gisLoaded() {
             const CLIENT_ID = '733612776249-qq9ctsimofokdklhlsp5ih8jrfj2b202.apps.googleusercontent.com';
-             if (CLIENT_ID === 'YOUR_CLIENT_ID') {
-                return;
-            }
+             if (CLIENT_ID === 'YOUR_CLIENT_ID') return;
+            
             tokenClient = google.accounts.oauth2.initTokenClient({
                 client_id: CLIENT_ID,
                 scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets',
@@ -369,9 +369,8 @@
         let dataFileId = localStorage.getItem('dataFileId');
 
         async function initializeGapiClient() {
-            if (API_KEY === 'YOUR_API_KEY') {
-                return;
-            }
+            if (API_KEY === 'YOUR_API_KEY') return;
+            
             await gapi.client.init({
                 apiKey: API_KEY,
                 discoveryDocs: DISCOVERY_DOCS,
@@ -379,9 +378,14 @@
             gapiInited = true;
             initializeAppIfReady();
         }
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            domReady = true;
+            initializeAppIfReady();
+        });
 
         function initializeAppIfReady() {
-            if (gapiInited && gisInited) {
+            if (gapiInited && gisInited && domReady) {
                 initializeApp();
             }
         }
@@ -390,7 +394,7 @@
             // --- STATE MANAGEMENT ---
             let appState = {
                 exams: [],
-                currentRole: null, // 'admin' or 'student'
+                currentRole: null,
                 currentTestSession: null,
                 timerInterval: null,
             };
@@ -1128,7 +1132,7 @@
                 } catch (err) {
                     console.error("Error during admin session initialization:", err);
                     const errorDetails = (err && err.result && err.result.error && err.result.error.message) ? err.result.error.message : (err ? (err.message || JSON.stringify(err)) : "Không có thông tin chi tiết.");
-                    alert(`Đã xảy ra lỗi khi kết nối với Google Drive:\n\n${errorDetails}\n\nVui lòng thử đăng xuất và đăng nhập lại.`);
+                    alert(`Đã xảy ra lỗi khi kết nối với Google Drive:\n\n${errorDetails}\n\nVui lòng kiểm tra lại cấu hình trên Google Cloud Console hoặc thử đăng xuất và đăng nhập lại.`);
                     showApiStatus("Lỗi kết nối Drive", true);
                 }
             }
