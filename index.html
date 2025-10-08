@@ -1000,8 +1000,8 @@
                     let userAnswerText = (item.userAnswer !== null && item.userAnswer !== undefined) ? item.userAnswer : 'Chưa trả lời';
                     let correctAnswerText = (item.correctAnswer !== null && item.correctAnswer !== undefined) ? item.correctAnswer : '';
                     if(item.type === 'multiple-choice'){
-                        userAnswerText = (item.userAnswer !== null && typeof item.options[item.userAnswer] !== 'undefined') ? `<span class="font-bold mr-1">${String.fromCharCode(65 + parseInt(item.userAnswer))}.</span> ${item.options[item.userAnswer]}` : 'Chưa trả lời';
-                        correctAnswerText = (typeof item.options[item.correctAnswer] !== 'undefined') ? `<span class="font-bold mr-1">${String.fromCharCode(65 + parseInt(item.correctAnswer))}.</span> ${item.options[item.correctAnswer]}` : '';
+                        userAnswerText = (item.userAnswer !== 'Chưa trả lời' && typeof item.options[parseInt(item.userAnswer)] !== 'undefined') ? `<span class="font-bold mr-1">${String.fromCharCode(65 + parseInt(item.userAnswer))}.</span> ${item.options[item.userAnswer]}` : 'Chưa trả lời';
+                        correctAnswerText = (typeof item.options[parseInt(item.correctAnswer)] !== 'undefined') ? `<span class="font-bold mr-1">${String.fromCharCode(65 + parseInt(item.correctAnswer))}.</span> ${item.options[item.correctAnswer]}` : '';
                     } else if (item.type === 'true-false' && item.userAnswer !== 'Chưa trả lời') {
                          userAnswerText = item.sub_questions.map(sq => `<span>${sq.id}: <strong>${item.userAnswer[sq.id] ? 'Đúng' : 'Sai'}</strong></span>`).join('<br>');
                          correctAnswerText = item.sub_questions.map(sq => `<span>${sq.id}: <strong>${item.correctAnswer[sq.id] ? 'Đúng' : 'Sai'}</strong></span>`).join('<br>');
@@ -1087,24 +1087,26 @@
                          fileId: dataFileId,
                          alt: 'media',
                      });
-                     appState.exams = JSON.parse(response.body) || [];
-                 } catch (err) {
-                     console.error("Error loading file content:", err);
-                     if (err.status === 404) {
-                         appState.exams = [];
-                         await saveData();
+                     if (response.body && response.body.length > 0) {
+                        appState.exams = JSON.parse(response.body);
+                     } else {
+                        appState.exams = []; // File is empty, initialize with an empty array
                      }
+                 } catch (err) {
+                    console.error("Error loading file content:", err);
+                    if (err.status === 404) {
+                        appState.exams = [];
+                        await saveData(); // Create a new empty file
+                    }
                  }
                  renderAdminExamList();
                  renderStudentExamList();
             }
             
             async function initializeAdminSession() {
-                // Change view FIRST
                 appState.currentRole = 'admin';
                 showView('admin');
-                renderAdminExamList();
-
+                
                 try {
                     const userResponse = await gapi.client.request({
                         path: 'https://www.googleapis.com/oauth2/v3/userinfo'
@@ -1118,7 +1120,8 @@
                     await loadDriveData();
                 } catch (err) {
                     console.error("Error during admin session initialization:", err);
-                    alert("Đã xảy ra lỗi khi kết nối với Google Drive. Vui lòng thử đăng xuất và đăng nhập lại.");
+                    const errorDetails = err.result ? err.result.error.message : (err.message || "Không có thông tin chi tiết.");
+                    alert(`Đã xảy ra lỗi khi kết nối với Google Drive:\n\n${errorDetails}\n\nVui lòng thử đăng xuất và đăng nhập lại.`);
                     showApiStatus("Lỗi kết nối Drive", true);
                 }
             }
@@ -1129,23 +1132,8 @@
             studentRoleBtn.addEventListener('click', () => {
                 appState.currentRole = 'student';
                 if(!gapiInited || !gisInited || !dataFileId) {
-                    // This logic is flawed for students on different browsers.
-                    // A better approach would be to make the Drive file public.
-                    // For now, we load from local storage as a fallback.
-                    const localData = localStorage.getItem('mathTestApp');
-                    if (localData) {
-                        try {
-                           appState.exams = JSON.parse(localData);
-                        } catch(e){
-                            appState.exams = [];
-                        }
-                    } else {
-                        appState.exams = [];
-                    }
-                    if (appState.exams.length === 0) {
-                        alert("Hệ thống chưa có đề thi nào. Vui lòng yêu cầu quản trị viên đăng nhập và tạo đề trước.");
-                        return;
-                    }
+                    alert("Hệ thống chưa có đề thi nào. Vui lòng yêu cầu quản trị viên đăng nhập và tạo đề trước.");
+                    return;
                 }
                 renderStudentExamList();
                 showView('student');
