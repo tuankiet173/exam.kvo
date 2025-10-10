@@ -350,26 +350,27 @@
             let dataFileId = localStorage.getItem('dataFileId');
             let tokenClient;
 
-            function initializeGapiClient() {
-                return gapi.client.init({
-                    apiKey: API_KEY,
-                    discoveryDocs: DISCOVERY_DOCS,
-                });
+            function gapiLoaded() {
+                gapi.load('client', initializeGapiClient);
             }
 
-            function initializeGisClient() {
+            function gisLoaded() {
                 tokenClient = google.accounts.oauth2.initTokenClient({
                     client_id: CLIENT_ID,
                     scope: SCOPES,
                     callback: '', // Will be defined dynamically
                 });
             }
+             window.gapiLoaded = gapiLoaded;
+             window.gisLoaded = gisLoaded;
 
-            gapi.load('client', async () => {
-                await initializeGapiClient();
-                initializeGisClient();
+            async function initializeGapiClient() {
+                await gapi.client.init({
+                    apiKey: API_KEY,
+                    discoveryDocs: DISCOVERY_DOCS,
+                });
                 initializeApp();
-            });
+            }
 
             function initializeApp() {
                 // --- STATE MANAGEMENT ---
@@ -579,7 +580,7 @@
                                     <option value="short-answer" ${qType === 'short-answer' ? 'selected' : ''}>Trả lời ngắn (0.5đ)</option>
                                 </select>
                             </div>
-                            <button class="delete-question-btn text-red-500 hover:text-red-700 text-lg"><i class="fas fa-trash-alt"></i></button>
+                             <button class="delete-question-btn text-red-500 hover:text-red-700 text-lg"><i class="fas fa-trash-alt"></i></button>
                         </div>
                         <div>
                             <label class="block font-semibold mb-1">Nội dung câu hỏi:</label>
@@ -1094,21 +1095,17 @@
                 }
                 
                 async function initializeAdminSession() {
-                    // Change view FIRST
                     appState.currentRole = 'admin';
                     showView('admin');
                     renderAdminExamList();
-
                     try {
                         const userResponse = await gapi.client.request({
                             path: 'https://www.googleapis.com/oauth2/v3/userinfo'
                         });
                         document.getElementById('admin-email').textContent = `Đăng nhập: ${userResponse.result.email}`;
-                        
                         const folderId = await findOrCreateFolder();
                         dataFileId = await findOrCreateFile(folderId);
                         localStorage.setItem('dataFileId', dataFileId);
-                        
                         await loadDriveData();
                     } catch (err) {
                         console.error("Error during admin session initialization:", err);
@@ -1127,9 +1124,6 @@
                          alert("Hệ thống chưa có đề thi nào. Vui lòng yêu cầu quản trị viên đăng nhập và tạo đề trước.");
                         return;
                     }
-                    // For students, we'll try to load the data directly
-                    // This requires the data file on Drive to be public
-                    // A more secure way would be a backend, but for this client-only app:
                     gapi.client.drive.files.get({
                         fileId: dataFileId,
                         alt: 'media'
@@ -1242,7 +1236,6 @@
                 // --- INITIALIZATION ---
                 showView('roleSelection');
             }
-
         }
     </script>
 </body>
