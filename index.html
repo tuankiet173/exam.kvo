@@ -136,8 +136,8 @@
     <!-- Mammoth.js for DOCX processing -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.7.1/mammoth.browser.min.js"></script>
     <!-- Google API Client Library -->
-    <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
-    <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://accounts.google.com/gsi/client"></script>
 
 </head>
 <body class="antialiased text-slate-800">
@@ -335,918 +335,915 @@
 
     <!-- Main Application Script -->
     <script>
-        let tokenClient;
-        let gapiInited = false;
-        let gisInited = false;
-        let domReady = false;
-
-        function gapiLoaded() {
-            gapi.load('client', initializeGapiClient);
-        }
-
-        function gisLoaded() {
+        window.onload = () => {
             const CLIENT_ID = '733612776249-q958bve74pf9k893oeen74649q2p45sk.apps.googleusercontent.com';
-            if (CLIENT_ID === 'YOUR_CLIENT_ID') return;
+            const API_KEY = 'AIzaSyDsEHy2K-N0qc1JIEz0jDmaemkMcoRUQkc';
+            const SPREADSHEET_ID = '13Clyp6ftJjJl0BA9l9J4wpc3Ii7w8thvLxlLEGlXy4c';
+            const DISCOVERY_DOCS = [
+                "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest",
+                "https://sheets.googleapis.com/$discovery/rest?version=v4"
+            ];
+            const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets';
             
-            tokenClient = google.accounts.oauth2.initTokenClient({
-                client_id: CLIENT_ID,
-                scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets',
-                callback: '', // defined dynamically
-            });
-            gisInited = true;
-            initializeAppIfReady();
-        }
+            const FOLDER_NAME = 'WebAppThiTracNghiem_Data';
+            const FILE_NAME = 'exams_data.json';
+            let dataFileId = localStorage.getItem('dataFileId');
+            let tokenClient;
 
-        const API_KEY = 'AIzaSyDsEHy2K-N0qc1JIEz0jDmaemkMcoRUQkc';
-        const SPREADSHEET_ID = '13Clyp6ftJjJl0BA9l9J4wpc3Ii7w8thvLxlLEGlXy4c';
-        const DISCOVERY_DOCS = [
-            "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest",
-            "https://sheets.googleapis.com/$discovery/rest?version=v4"
-        ];
-        
-        const FOLDER_NAME = 'WebAppThiTracNghiem_Data';
-        const FILE_NAME = 'exams_data.json';
-        let dataFileId = localStorage.getItem('dataFileId');
-
-        async function initializeGapiClient() {
-            if (API_KEY === 'YOUR_API_KEY') return;
-            
-            await gapi.client.init({
-                apiKey: API_KEY,
-                discoveryDocs: DISCOVERY_DOCS,
-            });
-            gapiInited = true;
-            initializeAppIfReady();
-        }
-        
-        document.addEventListener('DOMContentLoaded', () => {
-            domReady = true;
-            initializeAppIfReady();
-        });
-
-        function initializeAppIfReady() {
-            // This function ensures the app only runs when all parts are ready.
-            if (gapiInited && gisInited && domReady) {
-                initializeApp();
-            }
-        }
-
-        function initializeApp() {
-            // --- STATE MANAGEMENT ---
-            let appState = {
-                exams: [],
-                currentRole: null,
-                currentTestSession: null,
-                timerInterval: null,
-            };
-
-            // --- DOM ELEMENTS ---
-            const views = {
-                roleSelection: document.getElementById('role-selection-view'),
-                admin: document.getElementById('admin-view'),
-                student: document.getElementById('student-view'),
-                testTaking: document.getElementById('test-taking-view'),
-                results: document.getElementById('results-view'),
-            };
-
-            const adminLoginBtn = document.getElementById('admin-login-btn');
-            const adminLogoutBtn = document.getElementById('admin-logout-btn');
-            const studentRoleBtn = document.getElementById('student-role-btn');
-            const backToRoleBtns = document.querySelectorAll('.back-to-role-selection');
-            const uploadBtn = document.getElementById('upload-btn');
-            const examFileInput = document.getElementById('exam-file-input');
-            const createNewExamBtn = document.getElementById('create-new-exam-btn');
-            const adminExamList = document.getElementById('admin-exam-list');
-            const studentExamList = document.getElementById('student-exam-list');
-            const studentNameModal = document.getElementById('student-name-modal');
-            const studentNameInput = document.getElementById('student-name-input');
-            const startExamBtn = document.getElementById('start-exam-btn');
-            const examEditorModal = document.getElementById('exam-editor-modal');
-            const closeEditorModalBtn = document.getElementById('close-editor-modal-btn');
-            const saveExamBtn = document.getElementById('save-exam-btn');
-            const addQuestionBtn = document.getElementById('add-question-btn');
-            const editorQuestionsContainer = document.getElementById('editor-questions-container');
-            const questionsContainer = document.getElementById('questions-container');
-            const qNavContainer = document.getElementById('question-navigation');
-            const timerDisplay = document.getElementById('timer-display');
-            const submitTestBtn = document.getElementById('submit-test-btn');
-            const backToStudentViewBtn = document.getElementById('back-to-student-view-btn');
-            
-            // --- FUNCTIONS ---
-            const showView = (viewName) => {
-                Object.values(views).forEach(v => v.classList.add('hidden'));
-                if (views[viewName]) {
-                    views[viewName].classList.remove('hidden');
-                }
-            };
-            
-            const showApiStatus = (message, isError = false) => {
-                const statusEl = document.getElementById('api-status');
-                statusEl.textContent = message;
-                statusEl.className = `text-sm mr-4 opacity-100 ${isError ? 'text-red-500' : 'text-green-500'}`;
-                setTimeout(() => {
-                    statusEl.classList.add('opacity-0');
-                }, 3000);
-            };
-
-            const saveData = async () => {
-                try {
-                    showApiStatus('Đang lưu...');
-                    const content = JSON.stringify(appState.exams, null, 2);
-                    if (!dataFileId) {
-                       console.error("No data file ID found.");
-                       showApiStatus('Lỗi: Không tìm thấy file dữ liệu.', true);
-                       return;
-                    }
-                    await gapi.client.request({
-                        path: `/upload/drive/v3/files/${dataFileId}`,
-                        method: 'PATCH',
-                        params: { uploadType: 'media' },
-                        body: content
-                    });
-                    showApiStatus('Đã lưu thành công!');
-                } catch (err) {
-                    console.error("Error saving data to Drive:", err);
-                    showApiStatus('Lỗi khi lưu dữ liệu.', true);
-                }
-            };
-
-            const renderAdminExamList = () => {
-                adminExamList.innerHTML = '';
-                if (appState.exams.length === 0) {
-                    adminExamList.innerHTML = `<p class="text-slate-500 text-center">Chưa có đề thi nào. Hãy tạo một đề thi mới!</p>`;
-                    return;
-                }
-                appState.exams.forEach(exam => {
-                    const isConfigured = exam.questions.length > 0;
-                    const item = document.createElement('div');
-                    item.className = 'flex items-center justify-between p-3 bg-slate-50 rounded-lg border';
-                    item.innerHTML = `
-                        <div>
-                            <p class="font-bold">${exam.title}</p>
-                            <p class="text-sm text-slate-500">${exam.questions.length} câu hỏi - ${exam.duration} phút</p>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <span class="text-xs font-semibold px-2 py-1 rounded-full ${isConfigured ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}">
-                                ${isConfigured ? '<i class="fas fa-check-circle mr-1"></i>Hoàn chỉnh' : '<i class="fas fa-exclamation-triangle mr-1"></i>Chưa có câu hỏi'}
-                            </span>
-                            <button data-exam-id="${exam.id}" class="edit-exam-btn px-3 py-1 bg-blue-500 text-white text-sm rounded-md hover:bg-blue-600"><i class="fas fa-pen"></i> Sửa</button>
-                            <button data-exam-id="${exam.id}" class="delete-exam-btn px-3 py-1 bg-red-500 text-white text-sm rounded-md hover:bg-red-600"><i class="fas fa-trash"></i></button>
-                        </div>
-                    `;
-                    adminExamList.appendChild(item);
+            function initializeGapiClient() {
+                return gapi.client.init({
+                    apiKey: API_KEY,
+                    discoveryDocs: DISCOVERY_DOCS,
                 });
-            };
+            }
 
-            const parseAndPopulateEditor = (textResult, newExamId) => {
-                const text = textResult.value;
-                const lines = text.split('\n').filter(line => line.trim() !== '');
-                const questions = [];
-                let currentQuestion = null;
-                for (const line of lines) {
-                    const trimmedLine = line.trim();
-                    const questionMatch = trimmedLine.match(/^Câu \d+[:.]?/i);
-                    const optionMatch = trimmedLine.match(/^[A-D][.]/i);
-                    if (questionMatch) {
-                        if (currentQuestion) {
-                            while (currentQuestion.options.length < 4) currentQuestion.options.push('');
-                            questions.push(currentQuestion);
-                        }
-                        currentQuestion = {
-                            type: 'multiple-choice',
-                            content: trimmedLine.replace(/^Câu \d+[:.]?\s*/i, '').trim(),
-                            options: [],
-                        };
-                    } else if (currentQuestion && optionMatch) {
-                        if (currentQuestion.options.length < 4) {
-                            currentQuestion.options.push(trimmedLine.replace(/^[A-D][.]\s*/i, '').trim());
-                        }
-                    } else if (currentQuestion) {
-                        if (currentQuestion.options.length > 0) {
-                            const lastOptionIndex = currentQuestion.options.length - 1;
-                            currentQuestion.options[lastOptionIndex] += ' ' + trimmedLine;
-                        } else {
-                            currentQuestion.content += ' ' + trimmedLine;
-                        }
+            function initializeGisClient() {
+                tokenClient = google.accounts.oauth2.initTokenClient({
+                    client_id: CLIENT_ID,
+                    scope: SCOPES,
+                    callback: '', // Will be defined dynamically
+                });
+            }
+
+            gapi.load('client', async () => {
+                await initializeGapiClient();
+                initializeGisClient();
+                initializeApp();
+            });
+
+            function initializeApp() {
+                // --- STATE MANAGEMENT ---
+                let appState = {
+                    exams: [],
+                    currentRole: null,
+                    currentTestSession: null,
+                    timerInterval: null,
+                };
+
+                // --- DOM ELEMENTS ---
+                const views = {
+                    roleSelection: document.getElementById('role-selection-view'),
+                    admin: document.getElementById('admin-view'),
+                    student: document.getElementById('student-view'),
+                    testTaking: document.getElementById('test-taking-view'),
+                    results: document.getElementById('results-view'),
+                };
+
+                const adminLoginBtn = document.getElementById('admin-login-btn');
+                const adminLogoutBtn = document.getElementById('admin-logout-btn');
+                const studentRoleBtn = document.getElementById('student-role-btn');
+                const backToRoleBtns = document.querySelectorAll('.back-to-role-selection');
+                const uploadBtn = document.getElementById('upload-btn');
+                const examFileInput = document.getElementById('exam-file-input');
+                const createNewExamBtn = document.getElementById('create-new-exam-btn');
+                const adminExamList = document.getElementById('admin-exam-list');
+                const studentExamList = document.getElementById('student-exam-list');
+                const studentNameModal = document.getElementById('student-name-modal');
+                const studentNameInput = document.getElementById('student-name-input');
+                const startExamBtn = document.getElementById('start-exam-btn');
+                const examEditorModal = document.getElementById('exam-editor-modal');
+                const closeEditorModalBtn = document.getElementById('close-editor-modal-btn');
+                const saveExamBtn = document.getElementById('save-exam-btn');
+                const addQuestionBtn = document.getElementById('add-question-btn');
+                const editorQuestionsContainer = document.getElementById('editor-questions-container');
+                const questionsContainer = document.getElementById('questions-container');
+                const qNavContainer = document.getElementById('question-navigation');
+                const timerDisplay = document.getElementById('timer-display');
+                const submitTestBtn = document.getElementById('submit-test-btn');
+                const backToStudentViewBtn = document.getElementById('back-to-student-view-btn');
+                
+                // --- FUNCTIONS ---
+                const showView = (viewName) => {
+                    Object.values(views).forEach(v => v.classList.add('hidden'));
+                    if (views[viewName]) {
+                        views[viewName].classList.remove('hidden');
                     }
-                }
-                if (currentQuestion) {
-                    while (currentQuestion.options.length < 4) currentQuestion.options.push('');
-                    questions.push(currentQuestion);
-                }
-                const exam = appState.exams.find(e => e.id === newExamId);
-                if (exam) {
-                    exam.questions = questions;
-                    openExamEditor(newExamId);
-                    alert(`${questions.length} câu hỏi đã được phân tích. Vui lòng kiểm tra lại nội dung, đặc biệt là các công thức toán, và đặt đáp án đúng.`);
-                } else {
-                    alert("Có lỗi xảy ra khi tạo đề thi mới.");
-                }
-            };
-            
-            const handleFileUpload = (file) => {
-                const newExam = {
-                    id: `exam-${Date.now()}`,
-                    title: file.name.replace(/\.docx$/i, '') || "Đề thi mới",
-                    duration: 90,
-                    questions: []
                 };
                 
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    mammoth.extractRawText({ arrayBuffer: event.target.result })
-                        .then(result => {
-                            appState.exams.push(newExam);
-                            renderAdminExamList();
-                            parseAndPopulateEditor(result, newExam.id);
-                        })
-                        .catch(err => {
-                            console.error("Error converting DOCX:", err);
-                            alert("Đã xảy ra lỗi khi phân tích file Word. Vui lòng đảm bảo file không bị lỗi.");
-                        });
+                const showApiStatus = (message, isError = false) => {
+                    const statusEl = document.getElementById('api-status');
+                    statusEl.textContent = message;
+                    statusEl.className = `text-sm mr-4 opacity-100 ${isError ? 'text-red-500' : 'text-green-500'}`;
+                    setTimeout(() => {
+                        statusEl.classList.add('opacity-0');
+                    }, 3000);
                 };
-                reader.readAsArrayBuffer(file);
-            };
 
-            const openExamEditor = (examId) => {
-                examEditorModal.dataset.examId = examId;
-                const exam = appState.exams.find(e => e.id === examId);
-                if (!exam) return;
-                document.getElementById('exam-title-input').value = exam.title;
-                document.getElementById('exam-duration-input').value = exam.duration;
-                editorQuestionsContainer.innerHTML = '';
-                exam.questions.forEach(q => addQuestionToEditor(q));
-                examEditorModal.classList.remove('hidden');
-                if (window.MathJax) {
-                    window.MathJax.typesetPromise();
-                }
-            };
-
-            const addQuestionToEditor = (questionData = null) => {
-                const qId = questionData ? questionData.id : `q-${Date.now()}`;
-                const qType = questionData ? questionData.type : 'multiple-choice';
-                const questionBlock = document.createElement('div');
-                questionBlock.className = 'p-4 border rounded-lg bg-slate-50 question-editor-block';
-                questionBlock.dataset.questionId = qId;
-                const imageInputId = `image-input-${qId}`;
-                questionBlock.innerHTML = `
-                    <div class="flex justify-between items-center mb-3">
-                        <div class="flex items-center gap-4">
-                            <label class="font-semibold">Loại câu hỏi:</label>
-                            <select class="question-type-select border rounded-md px-2 py-1">
-                                <option value="multiple-choice" ${qType === 'multiple-choice' ? 'selected' : ''}>Trắc nghiệm (0.25đ)</option>
-                                <option value="true-false" ${qType === 'true-false' ? 'selected' : ''}>Đúng/Sai (1.0đ)</option>
-                                <option value="short-answer" ${qType === 'short-answer' ? 'selected' : ''}>Trả lời ngắn (0.5đ)</option>
-                            </select>
-                        </div>
-                         <button class="delete-question-btn text-red-500 hover:text-red-700 text-lg"><i class="fas fa-trash-alt"></i></button>
-                    </div>
-                    <div>
-                        <label class="block font-semibold mb-1">Nội dung câu hỏi:</label>
-                        <textarea class="question-content-input w-full p-2 border rounded-md" placeholder="Nhập nội dung... (Sử dụng $...$ cho công thức toán)"></textarea>
-                    </div>
-                    <div class="image-editor-container mt-2">
-                        <div class="image-preview-container mb-2"></div>
-                        <input type="file" id="${imageInputId}" class="hidden image-input" accept="image/*">
-                        <button type="button" class="add-image-btn text-sm px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">
-                            <i class="fas fa-image mr-1"></i> ${questionData && questionData.imageSrc ? 'Thay đổi' : 'Thêm'} Hình Ảnh
-                        </button>
-                    </div>
-                    <div class="answers-editor-container mt-3"></div>
-                `;
-                editorQuestionsContainer.appendChild(questionBlock);
-                if (questionData) {
-                    questionBlock.querySelector('.question-content-input').value = questionData.content;
-                    if (questionData.imageSrc) {
-                        const previewContainer = questionBlock.querySelector('.image-preview-container');
-                        previewContainer.innerHTML = `<img src="${questionData.imageSrc}" class="max-w-xs max-h-40 border rounded p-1">`;
+                const saveData = async () => {
+                    try {
+                        showApiStatus('Đang lưu...');
+                        const content = JSON.stringify(appState.exams, null, 2);
+                        if (!dataFileId) {
+                           console.error("No data file ID found.");
+                           showApiStatus('Lỗi: Không tìm thấy file dữ liệu.', true);
+                           return;
+                        }
+                        await gapi.client.request({
+                            path: `/upload/drive/v3/files/${dataFileId}`,
+                            method: 'PATCH',
+                            params: { uploadType: 'media' },
+                            body: content
+                        });
+                        showApiStatus('Đã lưu thành công!');
+                    } catch (err) {
+                        console.error("Error saving data to Drive:", err);
+                        showApiStatus('Lỗi khi lưu dữ liệu.', true);
                     }
-                }
-                renderAnswerEditor(questionBlock, qType, questionData);
-            };
-            
-            const renderAnswerEditor = (questionBlock, qType, questionData) => {
-                const container = questionBlock.querySelector('.answers-editor-container');
-                container.innerHTML = '';
-                switch (qType) {
-                    case 'multiple-choice':
-                        const options = questionData ? questionData.options : ['', '', '', ''];
-                        const answer = questionData ? questionData.answer : null;
-                        let optionsHtml = '<h4 class="font-semibold mb-2">Các lựa chọn & Đáp án đúng</h4>';
-                        optionsHtml += options.map((opt, i) => `
-                            <div class="flex items-center gap-2 mb-2">
-                                <input type="radio" name="correct-answer-${questionBlock.dataset.questionId}" value="${i}" class="shrink-0" ${answer == i ? 'checked' : ''}>
-                                <span class="font-bold">${String.fromCharCode(65 + i)}.</span>
-                                <input type="text" class="option-input w-full p-2 border rounded-md" value="${opt}" placeholder="Nội dung lựa chọn ${String.fromCharCode(65 + i)}">
-                            </div>
-                        `).join('');
-                        container.innerHTML = optionsHtml;
-                        break;
-                    case 'true-false':
-                        const sub_questions = questionData ? questionData.sub_questions : [{id: 'a', text: ''}, {id: 'b', text: ''}, {id: 'c', text: ''}, {id: 'd', text: ''}];
-                        const tf_answers = questionData ? questionData.answer : {};
-                        let subQuestionsHtml = '<h4 class="font-semibold mb-2">Các mệnh đề & Đáp án đúng</h4>';
-                        subQuestionsHtml += sub_questions.map((sq, i) => `
-                            <div class="flex items-center gap-2 mb-2" data-sub-id="${String.fromCharCode(97 + i)}">
-                                <span class="font-bold">${String.fromCharCode(97 + i)}.</span>
-                                <input type="text" class="sub-question-input w-full p-2 border rounded-md" value="${sq.text}" placeholder="Nội dung mệnh đề ${String.fromCharCode(97 + i)}">
-                                <label class="switch" style="width: 80px; height: 28px;">
-                                    <input type="checkbox" class="sub-answer-checkbox" ${tf_answers[String.fromCharCode(97 + i)] ? 'checked' : ''}>
-                                    <span class="slider" style="background-color: #ef4444;"><span style="height: 20px; width: 20px; left: 4px; bottom: 4px;"></span></span>
-                                </label>
-                            </div>
-                        `).join('');
-                        container.innerHTML = subQuestionsHtml;
-                        break;
-                    case 'short-answer':
-                        const short_answer = questionData ? questionData.answer : '';
-                        container.innerHTML = `
-                            <h4 class="font-semibold mb-2">Đáp án đúng</h4>
-                            <input type="text" class="short-answer-input w-full p-2 border rounded-md" value="${short_answer}" placeholder="Nhập đáp án chính xác">
-                        `;
-                        break;
-                }
-            };
+                };
 
-            const saveExam = () => {
-                const examId = examEditorModal.dataset.examId;
-                let exam = appState.exams.find(e => e.id === examId);
-                if (!exam) {
-                    exam = { id: examId, title: "", duration: 90, questions: [] };
-                    appState.exams.push(exam);
-                }
-                exam.title = document.getElementById('exam-title-input').value;
-                exam.duration = parseInt(document.getElementById('exam-duration-input').value) || 90;
-                exam.questions = [];
-                editorQuestionsContainer.querySelectorAll('.question-editor-block').forEach(block => {
-                    const qType = block.querySelector('.question-type-select').value;
-                    const previewImg = block.querySelector('.image-preview-container img');
-                    const newQuestion = {
-                        id: block.dataset.questionId,
-                        part: 1, type: qType,
-                        content: block.querySelector('.question-content-input').value,
-                        imageSrc: previewImg ? previewImg.src : null,
-                        answer: null,
+                const renderAdminExamList = () => {
+                    adminExamList.innerHTML = '';
+                    if (appState.exams.length === 0) {
+                        adminExamList.innerHTML = `<p class="text-slate-500 text-center">Chưa có đề thi nào. Hãy tạo một đề thi mới!</p>`;
+                        return;
+                    }
+                    appState.exams.forEach(exam => {
+                        const isConfigured = exam.questions.length > 0;
+                        const item = document.createElement('div');
+                        item.className = 'flex items-center justify-between p-3 bg-slate-50 rounded-lg border';
+                        item.innerHTML = `
+                            <div>
+                                <p class="font-bold">${exam.title}</p>
+                                <p class="text-sm text-slate-500">${exam.questions.length} câu hỏi - ${exam.duration} phút</p>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-xs font-semibold px-2 py-1 rounded-full ${isConfigured ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}">
+                                    ${isConfigured ? '<i class="fas fa-check-circle mr-1"></i>Hoàn chỉnh' : '<i class="fas fa-exclamation-triangle mr-1"></i>Chưa có câu hỏi'}
+                                </span>
+                                <button data-exam-id="${exam.id}" class="edit-exam-btn px-3 py-1 bg-blue-500 text-white text-sm rounded-md hover:bg-blue-600"><i class="fas fa-pen"></i> Sửa</button>
+                                <button data-exam-id="${exam.id}" class="delete-exam-btn px-3 py-1 bg-red-500 text-white text-sm rounded-md hover:bg-red-600"><i class="fas fa-trash"></i></button>
+                            </div>
+                        `;
+                        adminExamList.appendChild(item);
+                    });
+                };
+
+                const parseAndPopulateEditor = (textResult, newExamId) => {
+                    const text = textResult.value;
+                    const lines = text.split('\n').filter(line => line.trim() !== '');
+                    const questions = [];
+                    let currentQuestion = null;
+                    for (const line of lines) {
+                        const trimmedLine = line.trim();
+                        const questionMatch = trimmedLine.match(/^Câu \d+[:.]?/i);
+                        const optionMatch = trimmedLine.match(/^[A-D][.]/i);
+                        if (questionMatch) {
+                            if (currentQuestion) {
+                                while (currentQuestion.options.length < 4) currentQuestion.options.push('');
+                                questions.push(currentQuestion);
+                            }
+                            currentQuestion = {
+                                type: 'multiple-choice',
+                                content: trimmedLine.replace(/^Câu \d+[:.]?\s*/i, '').trim(),
+                                options: [],
+                            };
+                        } else if (currentQuestion && optionMatch) {
+                            if (currentQuestion.options.length < 4) {
+                                currentQuestion.options.push(trimmedLine.replace(/^[A-D][.]\s*/i, '').trim());
+                            }
+                        } else if (currentQuestion) {
+                            if (currentQuestion.options.length > 0) {
+                                const lastOptionIndex = currentQuestion.options.length - 1;
+                                currentQuestion.options[lastOptionIndex] += ' ' + trimmedLine;
+                            } else {
+                                currentQuestion.content += ' ' + trimmedLine;
+                            }
+                        }
+                    }
+                    if (currentQuestion) {
+                        while (currentQuestion.options.length < 4) currentQuestion.options.push('');
+                        questions.push(currentQuestion);
+                    }
+                    const exam = appState.exams.find(e => e.id === newExamId);
+                    if (exam) {
+                        exam.questions = questions;
+                        openExamEditor(newExamId);
+                        alert(`${questions.length} câu hỏi đã được phân tích. Vui lòng kiểm tra lại nội dung, đặc biệt là các công thức toán, và đặt đáp án đúng.`);
+                    } else {
+                        alert("Có lỗi xảy ra khi tạo đề thi mới.");
+                    }
+                };
+                
+                const handleFileUpload = (file) => {
+                    const newExam = {
+                        id: `exam-${Date.now()}`,
+                        title: file.name.replace(/\.docx$/i, '') || "Đề thi mới",
+                        duration: 90,
+                        questions: []
                     };
+                    
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        mammoth.extractRawText({ arrayBuffer: event.target.result })
+                            .then(result => {
+                                appState.exams.push(newExam);
+                                renderAdminExamList();
+                                parseAndPopulateEditor(result, newExam.id);
+                            })
+                            .catch(err => {
+                                console.error("Error converting DOCX:", err);
+                                alert("Đã xảy ra lỗi khi phân tích file Word. Vui lòng đảm bảo file không bị lỗi.");
+                            });
+                    };
+                    reader.readAsArrayBuffer(file);
+                };
+
+                const openExamEditor = (examId) => {
+                    examEditorModal.dataset.examId = examId;
+                    const exam = appState.exams.find(e => e.id === examId);
+                    if (!exam) return;
+                    document.getElementById('exam-title-input').value = exam.title;
+                    document.getElementById('exam-duration-input').value = exam.duration;
+                    editorQuestionsContainer.innerHTML = '';
+                    exam.questions.forEach(q => addQuestionToEditor(q));
+                    examEditorModal.classList.remove('hidden');
+                    if (window.MathJax) {
+                        window.MathJax.typesetPromise();
+                    }
+                };
+
+                const addQuestionToEditor = (questionData = null) => {
+                    const qId = questionData ? questionData.id : `q-${Date.now()}`;
+                    const qType = questionData ? questionData.type : 'multiple-choice';
+                    const questionBlock = document.createElement('div');
+                    questionBlock.className = 'p-4 border rounded-lg bg-slate-50 question-editor-block';
+                    questionBlock.dataset.questionId = qId;
+                    const imageInputId = `image-input-${qId}`;
+                    questionBlock.innerHTML = `
+                        <div class="flex justify-between items-center mb-3">
+                            <div class="flex items-center gap-4">
+                                <label class="font-semibold">Loại câu hỏi:</label>
+                                <select class="question-type-select border rounded-md px-2 py-1">
+                                    <option value="multiple-choice" ${qType === 'multiple-choice' ? 'selected' : ''}>Trắc nghiệm (0.25đ)</option>
+                                    <option value="true-false" ${qType === 'true-false' ? 'selected' : ''}>Đúng/Sai (1.0đ)</option>
+                                    <option value="short-answer" ${qType === 'short-answer' ? 'selected' : ''}>Trả lời ngắn (0.5đ)</option>
+                                </select>
+                            </div>
+                            <button class="delete-question-btn text-red-500 hover:text-red-700 text-lg"><i class="fas fa-trash-alt"></i></button>
+                        </div>
+                        <div>
+                            <label class="block font-semibold mb-1">Nội dung câu hỏi:</label>
+                            <textarea class="question-content-input w-full p-2 border rounded-md" placeholder="Nhập nội dung... (Sử dụng $...$ cho công thức toán)"></textarea>
+                        </div>
+                        <div class="image-editor-container mt-2">
+                            <div class="image-preview-container mb-2"></div>
+                            <input type="file" id="${imageInputId}" class="hidden image-input" accept="image/*">
+                            <button type="button" class="add-image-btn text-sm px-3 py-1 bg-gray-200 rounded hover:bg-gray-300">
+                                <i class="fas fa-image mr-1"></i> ${questionData && questionData.imageSrc ? 'Thay đổi' : 'Thêm'} Hình Ảnh
+                            </button>
+                        </div>
+                        <div class="answers-editor-container mt-3"></div>
+                    `;
+                    editorQuestionsContainer.appendChild(questionBlock);
+                    if (questionData) {
+                        questionBlock.querySelector('.question-content-input').value = questionData.content;
+                        if (questionData.imageSrc) {
+                            const previewContainer = questionBlock.querySelector('.image-preview-container');
+                            previewContainer.innerHTML = `<img src="${questionData.imageSrc}" class="max-w-xs max-h-40 border rounded p-1">`;
+                        }
+                    }
+                    renderAnswerEditor(questionBlock, qType, questionData);
+                };
+                
+                const renderAnswerEditor = (questionBlock, qType, questionData) => {
+                    const container = questionBlock.querySelector('.answers-editor-container');
+                    container.innerHTML = '';
                     switch (qType) {
                         case 'multiple-choice':
-                            newQuestion.options = Array.from(block.querySelectorAll('.option-input')).map(input => input.value);
-                            const checkedRadio = block.querySelector(`input[name="correct-answer-${newQuestion.id}"]:checked`);
-                            if (checkedRadio) newQuestion.answer = checkedRadio.value;
-                            break;
-                        case 'true-false':
-                            newQuestion.sub_questions = [];
-                            newQuestion.answer = {};
-                            block.querySelectorAll('.sub-question-input').forEach((input, i) => {
-                                const subId = String.fromCharCode(97 + i);
-                                newQuestion.sub_questions.push({ id: subId, text: input.value });
-                                newQuestion.answer[subId] = block.querySelectorAll('.sub-answer-checkbox')[i].checked;
-                            });
-                            break;
-                        case 'short-answer':
-                            newQuestion.answer = block.querySelector('.short-answer-input').value;
-                            break;
-                    }
-                    exam.questions.push(newQuestion);
-                });
-                exam.questions.forEach((q, index) => q.id = index + 1);
-                renderAdminExamList();
-                examEditorModal.classList.add('hidden');
-                saveData();
-            };
-
-            const deleteExam = (examId) => {
-                if (confirm('Bạn có chắc chắn muốn xóa đề thi này?')) {
-                    appState.exams = appState.exams.filter(e => e.id !== examId);
-                    renderAdminExamList();
-                    saveData();
-                }
-            };
-
-            const renderStudentExamList = () => {
-                studentExamList.innerHTML = '';
-                const availableExams = appState.exams.filter(exam => exam.questions.length > 0);
-                if (availableExams.length === 0) {
-                    studentExamList.innerHTML = `<p class="text-slate-500 text-center">Chưa có đề thi nào sẵn sàng. Vui lòng quay lại sau.</p>`;
-                    return;
-                }
-                availableExams.forEach(exam => {
-                    const item = document.createElement('div');
-                    item.className = 'flex items-center justify-between p-4 bg-slate-50 rounded-lg border hover:shadow-md transition';
-                    item.innerHTML = `
-                        <div>
-                            <p class="font-bold text-lg">${exam.title}</p>
-                            <p class="text-sm text-slate-500">${exam.questions.length} câu hỏi - ${exam.duration} phút</p>
-                        </div>
-                        <button data-exam-id="${exam.id}" class="take-exam-btn px-5 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transform hover:scale-105 transition">
-                            <i class="fas fa-play mr-2"></i>Làm bài
-                        </button>
-                    `;
-                    studentExamList.appendChild(item);
-                });
-            };
-            
-            const openStudentNameModal = (examId) => {
-                studentNameModal.dataset.examId = examId;
-                studentNameModal.classList.remove('hidden');
-                studentNameInput.focus();
-            };
-
-            const startTest = (examId, studentName) => {
-                const exam = appState.exams.find(e => e.id === examId);
-                appState.currentTestSession = {
-                    examId, studentName,
-                    startTime: new Date(),
-                    answers: {}
-                };
-                document.getElementById('test-title').textContent = exam.title;
-                document.getElementById('student-name-display').textContent = studentName;
-                renderTestQuestions(exam);
-                startTimer(exam.duration);
-                showView('testTaking');
-            };
-
-            const renderTestQuestions = (exam) => {
-                questionsContainer.innerHTML = '';
-                qNavContainer.innerHTML = '';
-                exam.questions.forEach((q, index) => {
-                    let answerHtml = '';
-                    switch(q.type) {
-                        case 'multiple-choice':
-                            answerHtml = q.options.map((opt, i) => `
-                                <label class="flex items-start space-x-3 p-2 rounded-md hover:bg-slate-100 cursor-pointer">
-                                    <input type="radio" name="q_${q.id}" value="${i}" class="custom-radio form-radio h-5 w-5 text-blue-600 shrink-0 mt-1">
-                                    <div class="math-content">
-                                        <span class="font-bold mr-1">${String.fromCharCode(65 + i)}.</span>${opt}
-                                    </div>
-                                </label>
+                            const options = questionData ? questionData.options : ['', '', '', ''];
+                            const answer = questionData ? questionData.answer : null;
+                            let optionsHtml = '<h4 class="font-semibold mb-2">Các lựa chọn & Đáp án đúng</h4>';
+                            optionsHtml += options.map((opt, i) => `
+                                <div class="flex items-center gap-2 mb-2">
+                                    <input type="radio" name="correct-answer-${questionBlock.dataset.questionId}" value="${i}" class="shrink-0" ${answer == i ? 'checked' : ''}>
+                                    <span class="font-bold">${String.fromCharCode(65 + i)}.</span>
+                                    <input type="text" class="option-input w-full p-2 border rounded-md" value="${opt}" placeholder="Nội dung lựa chọn ${String.fromCharCode(65 + i)}">
+                                </div>
                             `).join('');
+                            container.innerHTML = optionsHtml;
                             break;
                         case 'true-false':
-                            answerHtml = q.sub_questions.map(sq => `
-                                <div class="flex items-center justify-between p-2 rounded-md border mb-2">
-                                    <span class="math-content flex-1">${sq.text}</span>
-                                    <label class="switch">
-                                        <input type="checkbox" data-sub-id="${sq.id}">
-                                        <span class="slider"></span>
+                            const sub_questions = questionData ? questionData.sub_questions : [{id: 'a', text: ''}, {id: 'b', text: ''}, {id: 'c', text: ''}, {id: 'd', text: ''}];
+                            const tf_answers = questionData ? questionData.answer : {};
+                            let subQuestionsHtml = '<h4 class="font-semibold mb-2">Các mệnh đề & Đáp án đúng</h4>';
+                            subQuestionsHtml += sub_questions.map((sq, i) => `
+                                <div class="flex items-center gap-2 mb-2" data-sub-id="${String.fromCharCode(97 + i)}">
+                                    <span class="font-bold">${String.fromCharCode(97 + i)}.</span>
+                                    <input type="text" class="sub-question-input w-full p-2 border rounded-md" value="${sq.text}" placeholder="Nội dung mệnh đề ${String.fromCharCode(97 + i)}">
+                                    <label class="switch" style="width: 80px; height: 28px;">
+                                        <input type="checkbox" class="sub-answer-checkbox" ${tf_answers[String.fromCharCode(97 + i)] ? 'checked' : ''}>
+                                        <span class="slider" style="background-color: #ef4444;"><span style="height: 20px; width: 20px; left: 4px; bottom: 4px;"></span></span>
                                     </label>
                                 </div>
                             `).join('');
+                            container.innerHTML = subQuestionsHtml;
                             break;
                         case 'short-answer':
-                            answerHtml = `<input type="text" placeholder="Nhập đáp án..." class="w-full mt-2 px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 outline-none">`;
+                            const short_answer = questionData ? questionData.answer : '';
+                            container.innerHTML = `
+                                <h4 class="font-semibold mb-2">Đáp án đúng</h4>
+                                <input type="text" class="short-answer-input w-full p-2 border rounded-md" value="${short_answer}" placeholder="Nhập đáp án chính xác">
+                            `;
                             break;
                     }
-                    const questionCard = document.createElement('div');
-                    questionCard.id = `question-${q.id}`;
-                    questionCard.className = 'bg-white p-6 rounded-xl shadow-lg question-card';
-                    questionCard.dataset.questionId = q.id;
-                    questionCard.dataset.questionType = q.type;
-                    const imageHtml = q.imageSrc ? `<div class="mb-4"><img src="${q.imageSrc}" class="max-w-md mx-auto rounded"></div>` : '';
-                    questionCard.innerHTML = `
-                        <div class="flex justify-between items-center mb-4">
-                            <h3 class="text-lg font-bold">Câu ${index + 1}</h3>
-                        </div>
-                        <div class="math-content mb-4">${q.content}</div>
-                        ${imageHtml}
-                        <div class="space-y-3">${answerHtml}</div>
-                    `;
-                    questionsContainer.appendChild(questionCard);
-                    const navItem = document.createElement('button');
-                    navItem.textContent = index + 1;
-                    navItem.dataset.targetId = `question-${q.id}`;
-                    navItem.className = 'question-nav-item w-10 h-10 rounded-md bg-slate-200 hover:bg-slate-300 font-bold';
-                    qNavContainer.appendChild(navItem);
-                });
-                if(window.MathJax) {
-                    window.MathJax.typesetPromise();
-                }
-            };
+                };
 
-            const updateQuestionNav = () => {
-                const session = appState.currentTestSession;
-                if(!session) return;
-                qNavContainer.querySelectorAll('.question-nav-item').forEach(btn => {
-                    const targetId = btn.dataset.targetId.split('-')[1];
-                    if (session.answers[targetId]) {
-                        btn.classList.add('answered');
-                    } else {
-                        btn.classList.remove('answered');
+                const saveExam = () => {
+                    const examId = examEditorModal.dataset.examId;
+                    let exam = appState.exams.find(e => e.id === examId);
+                    if (!exam) {
+                        exam = { id: examId, title: "", duration: 90, questions: [] };
+                        appState.exams.push(exam);
                     }
-                });
-            };
-
-            const startTimer = (durationMinutes) => {
-                let timeLeft = durationMinutes * 60;
-                clearInterval(appState.timerInterval);
-                appState.timerInterval = setInterval(() => {
-                    timeLeft--;
-                    const minutes = Math.floor(timeLeft / 60);
-                    const seconds = timeLeft % 60;
-                    timerDisplay.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-                    if (timeLeft <= 0) {
-                        clearInterval(appState.timerInterval);
-                        submitTest(true);
-                    }
-                }, 1000);
-            };
-            
-            const collectAnswers = () => {
-                const session = appState.currentTestSession;
-                questionsContainer.querySelectorAll('.question-card').forEach(card => {
-                    const qId = card.dataset.questionId;
-                    const qType = card.dataset.questionType;
-                    let answer = null;
-                    switch(qType) {
-                        case 'multiple-choice':
-                            const checkedRadio = card.querySelector('input[type="radio"]:checked');
-                            if (checkedRadio) answer = checkedRadio.value;
-                            break;
-                        case 'true-false':
-                            answer = {};
-                            let hasTrueFalseAnswer = false;
-                            card.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-                                answer[cb.dataset.subId] = cb.checked;
-                                hasTrueFalseAnswer = true;
-                            });
-                            if (!hasTrueFalseAnswer) answer = null;
-                            break;
-                        case 'short-answer':
-                            const input = card.querySelector('input[type="text"]');
-                            if (input && input.value.trim() !== '') answer = input.value.trim();
-                            break;
-                    }
-                    session.answers[qId] = answer;
-                });
-            };
-
-            const submitTest = (isAutoSubmit = false) => {
-                 if(!isAutoSubmit) {
-                    const existingModal = document.getElementById('custom-confirm-modal');
-                    if (existingModal) return;
-                    const modal = document.createElement('div');
-                    modal.id = 'custom-confirm-modal';
-                    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop';
-                    modal.innerHTML = `
-                        <div class="bg-white rounded-xl shadow-2xl p-8 w-full max-w-md text-center">
-                            <h2 class="text-2xl font-bold mb-4">Xác Nhận Nộp Bài</h2>
-                            <p class="text-slate-600 mb-8">Bạn có chắc chắn muốn kết thúc và nộp bài thi không?</p>
-                            <div class="flex justify-center gap-4">
-                                <button id="confirm-yes-btn" class="px-8 py-3 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700">Nộp Bài</button>
-                                <button id="confirm-no-btn" class="px-8 py-3 bg-slate-200 text-slate-800 font-semibold rounded-lg shadow-md hover:bg-slate-300">Hủy</button>
-                            </div>
-                        </div>
-                    `;
-                    document.body.appendChild(modal);
-                    document.getElementById('confirm-yes-btn').onclick = () => {
-                        modal.remove();
-                        finishTest();
-                    };
-                    document.getElementById('confirm-no-btn').onclick = () => {
-                        modal.remove();
-                    };
-                } else {
-                     alert("Hết giờ làm bài! Bài thi sẽ được nộp tự động.");
-                     finishTest();
-                }
-            };
-            
-            const finishTest = async () => {
-                clearInterval(appState.timerInterval);
-                collectAnswers();
-                const session = appState.currentTestSession;
-                const exam = appState.exams.find(e => e.id === session.examId);
-                let totalScore = 0;
-                let maxScore = 0;
-                const reviewData = exam.questions.map((q, index) => {
-                    const userAnswer = session.answers[q.id];
-                    const correctAnswer = q.answer;
-                    let questionScore = 0;
-                    let isCorrect = false;
-                    let userAnswerText = 'Chưa trả lời';
-                    let correctAnswerText = '';
-                    switch(q.type) {
-                        case 'multiple-choice':
-                            maxScore += 0.25;
-                            isCorrect = userAnswer == correctAnswer;
-                            if (isCorrect) questionScore = 0.25;
-                            if(userAnswer !== null) userAnswerText = `${String.fromCharCode(65 + parseInt(userAnswer))}. ${q.options[userAnswer]}`;
-                            correctAnswerText = `${String.fromCharCode(65 + parseInt(correctAnswer))}. ${q.options[correctAnswer]}`;
-                            break;
-                        case 'true-false':
-                            maxScore += 1.0;
-                            let correctSubAnswers = 0;
-                            if (userAnswer) {
-                                userAnswerText = q.sub_questions.map(sq => `${sq.id}: ${userAnswer[sq.id] ? 'Đúng' : 'Sai'}`).join('; ');
-                                for(const subId in correctAnswer) {
-                                    if((userAnswer[subId] || false) === correctAnswer[subId]) {
-                                        correctSubAnswers++;
-                                    }
-                                }
-                            }
-                            if (correctSubAnswers === 1) questionScore = 0.1;
-                            else if (correctSubAnswers === 2) questionScore = 0.25;
-                            else if (correctSubAnswers === 3) questionScore = 0.5;
-                            else if (correctSubAnswers === 4) questionScore = 1.0;
-                            isCorrect = correctSubAnswers === 4;
-                            correctAnswerText = q.sub_questions.map(sq => `${sq.id}: ${correctAnswer[sq.id] ? 'Đúng' : 'Sai'}`).join('; ');
-                            break;
-                        case 'short-answer':
-                             maxScore += 0.5;
-                            isCorrect = userAnswer && correctAnswer && userAnswer.toLowerCase().trim() === correctAnswer.toLowerCase().trim();
-                             if (isCorrect) questionScore = 0.5;
-                            if (userAnswer) userAnswerText = userAnswer;
-                            correctAnswerText = correctAnswer;
-                            break;
-                    }
-                    totalScore += questionScore;
-                    return { ...q, index: index + 1, userAnswer, correctAnswer, isCorrect };
-                });
-                renderResults(totalScore, maxScore, reviewData);
-                showView('results');
-                try {
-                    const timestamp = new Date().toLocaleString('vi-VN');
-                    const values = [[
-                        timestamp,
-                        session.studentName,
-                        exam.title,
-                        Number(totalScore.toFixed(2)),
-                    ]];
-                    await gapi.client.sheets.spreadsheets.values.append({
-                        spreadsheetId: SPREADSHEET_ID,
-                        range: 'A1',
-                        valueInputOption: 'USER_ENTERED',
-                        resource: { values: values },
+                    exam.title = document.getElementById('exam-title-input').value;
+                    exam.duration = parseInt(document.getElementById('exam-duration-input').value) || 90;
+                    exam.questions = [];
+                    editorQuestionsContainer.querySelectorAll('.question-editor-block').forEach(block => {
+                        const qType = block.querySelector('.question-type-select').value;
+                        const previewImg = block.querySelector('.image-preview-container img');
+                        const newQuestion = {
+                            id: block.dataset.questionId,
+                            part: 1, type: qType,
+                            content: block.querySelector('.question-content-input').value,
+                            imageSrc: previewImg ? previewImg.src : null,
+                            answer: null,
+                        };
+                        switch (qType) {
+                            case 'multiple-choice':
+                                newQuestion.options = Array.from(block.querySelectorAll('.option-input')).map(input => input.value);
+                                const checkedRadio = block.querySelector(`input[name="correct-answer-${newQuestion.id}"]:checked`);
+                                if (checkedRadio) newQuestion.answer = checkedRadio.value;
+                                break;
+                            case 'true-false':
+                                newQuestion.sub_questions = [];
+                                newQuestion.answer = {};
+                                block.querySelectorAll('.sub-question-input').forEach((input, i) => {
+                                    const subId = String.fromCharCode(97 + i);
+                                    newQuestion.sub_questions.push({ id: subId, text: input.value });
+                                    newQuestion.answer[subId] = block.querySelectorAll('.sub-answer-checkbox')[i].checked;
+                                });
+                                break;
+                            case 'short-answer':
+                                newQuestion.answer = block.querySelector('.short-answer-input').value;
+                                break;
+                        }
+                        exam.questions.push(newQuestion);
                     });
-                } catch (err) {
-                    console.error("Error writing to sheet:", err);
-                    alert("Không thể lưu điểm của bạn lên Google Sheets. Vui lòng kiểm tra lại cấu hình API của quản trị viên.");
-                }
-            }
+                    exam.questions.forEach((q, index) => q.id = index + 1);
+                    renderAdminExamList();
+                    examEditorModal.classList.add('hidden');
+                    saveData();
+                };
 
-            const renderResults = (score, total, reviewData) => {
-                const scoreDisplay = document.getElementById('score-display');
-                const reviewContainer = document.getElementById('review-container');
-                const resultIcon = document.getElementById('result-icon');
-                const resultTitle = document.getElementById('result-title');
-                scoreDisplay.textContent = `${Number(score.toFixed(2))}/${Number(total.toFixed(2))}`;
-                const percentage = total > 0 ? (score / total) * 100 : 0;
-                if (percentage >= 80) {
-                    resultTitle.textContent = "Xuất sắc!";
-                    resultIcon.className = "fas fa-trophy text-7xl mb-4 text-yellow-400";
-                } else if (percentage >= 50) {
-                    resultTitle.textContent = "Làm tốt lắm!";
-                    resultIcon.className = "fas fa-award text-7xl mb-4 text-blue-500";
-                } else {
-                    resultTitle.textContent = "Cần cố gắng hơn!";
-                    resultIcon.className = "fas fa-book-reader text-7xl mb-4 text-orange-500";
-                }
-                reviewContainer.innerHTML = reviewData.map(item => {
-                    let userAnswerText = (item.userAnswer !== null && item.userAnswer !== undefined) ? item.userAnswer : 'Chưa trả lời';
-                    let correctAnswerText = (item.correctAnswer !== null && item.correctAnswer !== undefined) ? item.correctAnswer : '';
-                    if(item.type === 'multiple-choice'){
-                        userAnswerText = (item.userAnswer !== 'Chưa trả lời' && typeof item.options[parseInt(item.userAnswer)] !== 'undefined') ? `<span class="font-bold mr-1">${String.fromCharCode(65 + parseInt(item.userAnswer))}.</span> ${item.options[item.userAnswer]}` : 'Chưa trả lời';
-                        correctAnswerText = (typeof item.options[parseInt(item.correctAnswer)] !== 'undefined') ? `<span class="font-bold mr-1">${String.fromCharCode(65 + parseInt(item.correctAnswer))}.</span> ${item.options[item.correctAnswer]}` : '';
-                    } else if (item.type === 'true-false' && item.userAnswer !== 'Chưa trả lời') {
-                         userAnswerText = item.sub_questions.map(sq => `<span>${sq.id}: <strong>${item.userAnswer[sq.id] ? 'Đúng' : 'Sai'}</strong></span>`).join('<br>');
-                         correctAnswerText = item.sub_questions.map(sq => `<span>${sq.id}: <strong>${item.correctAnswer[sq.id] ? 'Đúng' : 'Sai'}</strong></span>`).join('<br>');
+                const deleteExam = (examId) => {
+                    if (confirm('Bạn có chắc chắn muốn xóa đề thi này?')) {
+                        appState.exams = appState.exams.filter(e => e.id !== examId);
+                        renderAdminExamList();
+                        saveData();
                     }
-                    return `
-                    <div class="p-3 border rounded-lg ${item.isCorrect ? 'border-green-300 bg-green-50' : 'border-red-300 bg-red-50'}">
-                        <div class="flex justify-between items-start">
-                             <p class="font-bold mb-2 flex-1">Câu ${item.index}: <span class="math-content">${item.content}</span></p>
-                        </div>
-                        <div class="text-sm space-y-1">
-                            <div><strong>Bạn chọn:</strong> <div class="math-content inline-block ml-2 p-1 rounded ${item.isCorrect ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${userAnswerText}</div></div>
-                            ${!item.isCorrect ? `<div><strong>Đáp án đúng:</strong> <div class="math-content inline-block ml-2 p-1 rounded bg-green-100 text-green-800">${correctAnswerText}</div></div>` : ''}
-                        </div>
-                    </div>
-                `}).join('');
-                if(window.MathJax) {
-                    window.MathJax.typesetPromise();
-                }
-            };
-            
-            async function handleAuthClick() {
-                tokenClient.callback = async (resp) => {
-                    if (resp.error !== undefined) {
-                        const errorDetails = resp.error_description || JSON.stringify(resp);
-                        alert(`Đã xảy ra lỗi khi đăng nhập:\n\n${errorDetails}`);
-                        console.error("Authentication error:", resp);
+                };
+
+                const renderStudentExamList = () => {
+                    studentExamList.innerHTML = '';
+                    const availableExams = appState.exams.filter(exam => exam.questions.length > 0);
+                    if (availableExams.length === 0) {
+                        studentExamList.innerHTML = `<p class="text-slate-500 text-center">Chưa có đề thi nào sẵn sàng. Vui lòng quay lại sau.</p>`;
                         return;
                     }
-                    await initializeAdminSession();
+                    availableExams.forEach(exam => {
+                        const item = document.createElement('div');
+                        item.className = 'flex items-center justify-between p-4 bg-slate-50 rounded-lg border hover:shadow-md transition';
+                        item.innerHTML = `
+                            <div>
+                                <p class="font-bold text-lg">${exam.title}</p>
+                                <p class="text-sm text-slate-500">${exam.questions.length} câu hỏi - ${exam.duration} phút</p>
+                            </div>
+                            <button data-exam-id="${exam.id}" class="take-exam-btn px-5 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transform hover:scale-105 transition">
+                                <i class="fas fa-play mr-2"></i>Làm bài
+                            </button>
+                        `;
+                        studentExamList.appendChild(item);
+                    });
                 };
-                if (gapi.client.getToken() === null) {
-                    tokenClient.requestAccessToken({ prompt: 'consent' });
-                } else {
-                    tokenClient.requestAccessToken({ prompt: '' });
-                }
-            }
-            
-            function handleSignoutClick() {
-                const token = gapi.client.getToken();
-                if (token !== null) {
-                    google.accounts.oauth2.revoke(token.access_token);
-                    gapi.client.setToken('');
-                    appState.currentRole = null;
-                    localStorage.removeItem('dataFileId');
-                    dataFileId = null;
-                    document.getElementById('admin-email').textContent = '';
-                    showView('roleSelection');
-                }
-            }
-            
-             async function findOrCreateFolder() {
-                const response = await gapi.client.drive.files.list({
-                    q: `mimeType='application/vnd.google-apps.folder' and name='${FOLDER_NAME}' and trashed=false`,
-                    fields: 'files(id, name)',
-                });
-                if (response.result.files.length > 0) {
-                    return response.result.files[0].id;
-                } else {
-                    const createResponse = await gapi.client.drive.files.create({
-                        resource: { name: FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' },
-                        fields: 'id',
-                    });
-                    return createResponse.result.id;
-                }
-            }
+                
+                const openStudentNameModal = (examId) => {
+                    studentNameModal.dataset.examId = examId;
+                    studentNameModal.classList.remove('hidden');
+                    studentNameInput.focus();
+                };
 
-            async function findOrCreateFile(folderId) {
-                const response = await gapi.client.drive.files.list({
-                    q: `'${folderId}' in parents and name='${FILE_NAME}' and trashed=false`,
-                    fields: 'files(id, name)',
-                });
-                if (response.result.files.length > 0) {
-                    return response.result.files[0].id;
-                } else {
-                    const createResponse = await gapi.client.drive.files.create({
-                        resource: { name: FILE_NAME, mimeType: 'application/json', parents: [folderId] },
-                        fields: 'id',
+                const startTest = (examId, studentName) => {
+                    const exam = appState.exams.find(e => e.id === examId);
+                    appState.currentTestSession = {
+                        examId, studentName,
+                        startTime: new Date(),
+                        answers: {}
+                    };
+                    document.getElementById('test-title').textContent = exam.title;
+                    document.getElementById('student-name-display').textContent = studentName;
+                    renderTestQuestions(exam);
+                    startTimer(exam.duration);
+                    showView('testTaking');
+                };
+
+                const renderTestQuestions = (exam) => {
+                    questionsContainer.innerHTML = '';
+                    qNavContainer.innerHTML = '';
+                    exam.questions.forEach((q, index) => {
+                        let answerHtml = '';
+                        switch(q.type) {
+                            case 'multiple-choice':
+                                answerHtml = q.options.map((opt, i) => `
+                                    <label class="flex items-start space-x-3 p-2 rounded-md hover:bg-slate-100 cursor-pointer">
+                                        <input type="radio" name="q_${q.id}" value="${i}" class="custom-radio form-radio h-5 w-5 text-blue-600 shrink-0 mt-1">
+                                        <div class="math-content">
+                                            <span class="font-bold mr-1">${String.fromCharCode(65 + i)}.</span>${opt}
+                                        </div>
+                                    </label>
+                                `).join('');
+                                break;
+                            case 'true-false':
+                                answerHtml = q.sub_questions.map(sq => `
+                                    <div class="flex items-center justify-between p-2 rounded-md border mb-2">
+                                        <span class="math-content flex-1">${sq.text}</span>
+                                        <label class="switch">
+                                            <input type="checkbox" data-sub-id="${sq.id}">
+                                            <span class="slider"></span>
+                                        </label>
+                                    </div>
+                                `).join('');
+                                break;
+                            case 'short-answer':
+                                answerHtml = `<input type="text" placeholder="Nhập đáp án..." class="w-full mt-2 px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 outline-none">`;
+                                break;
+                        }
+                        const questionCard = document.createElement('div');
+                        questionCard.id = `question-${q.id}`;
+                        questionCard.className = 'bg-white p-6 rounded-xl shadow-lg question-card';
+                        questionCard.dataset.questionId = q.id;
+                        questionCard.dataset.questionType = q.type;
+                        const imageHtml = q.imageSrc ? `<div class="mb-4"><img src="${q.imageSrc}" class="max-w-md mx-auto rounded"></div>` : '';
+                        questionCard.innerHTML = `
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-lg font-bold">Câu ${index + 1}</h3>
+                            </div>
+                            <div class="math-content mb-4">${q.content}</div>
+                            ${imageHtml}
+                            <div class="space-y-3">${answerHtml}</div>
+                        `;
+                        questionsContainer.appendChild(questionCard);
+                        const navItem = document.createElement('button');
+                        navItem.textContent = index + 1;
+                        navItem.dataset.targetId = `question-${q.id}`;
+                        navItem.className = 'question-nav-item w-10 h-10 rounded-md bg-slate-200 hover:bg-slate-300 font-bold';
+                        qNavContainer.appendChild(navItem);
                     });
-                    return createResponse.result.id;
-                }
-            }
-            
-            async function loadDriveData() {
-                 try {
-                     const response = await gapi.client.drive.files.get({
-                         fileId: dataFileId,
-                         alt: 'media',
-                     });
-                     if (response.body && response.body.length > 0) {
-                        appState.exams = JSON.parse(response.body);
-                     } else {
-                        appState.exams = []; // File is empty, initialize with an empty array
-                     }
-                 } catch (err) {
-                    console.error("Error loading file content:", err);
-                    if (err.status === 404) {
-                        appState.exams = [];
-                        await saveData(); // Create a new empty file
-                    } else {
-                        throw err; // Re-throw other errors to be caught by the caller
+                    if(window.MathJax) {
+                        window.MathJax.typesetPromise();
                     }
-                 }
-                 renderAdminExamList();
-                 renderStudentExamList();
-            }
-            
-            async function initializeAdminSession() {
-                // Change view FIRST
-                appState.currentRole = 'admin';
-                showView('admin');
-                renderAdminExamList();
+                };
 
-                try {
-                    const userResponse = await gapi.client.request({
-                        path: 'https://www.googleapis.com/oauth2/v3/userinfo'
+                const updateQuestionNav = () => {
+                    const session = appState.currentTestSession;
+                    if(!session) return;
+                    qNavContainer.querySelectorAll('.question-nav-item').forEach(btn => {
+                        const targetId = btn.dataset.targetId.split('-')[1];
+                        if (session.answers[targetId]) {
+                            btn.classList.add('answered');
+                        } else {
+                            btn.classList.remove('answered');
+                        }
                     });
-                    document.getElementById('admin-email').textContent = `Đăng nhập: ${userResponse.result.email}`;
-                    
-                    const folderId = await findOrCreateFolder();
-                    dataFileId = await findOrCreateFile(folderId);
-                    localStorage.setItem('dataFileId', dataFileId);
-                    
-                    await loadDriveData();
-                } catch (err) {
-                    console.error("Error during admin session initialization:", err);
-                    const errorDetails = (err && err.result && err.result.error && err.result.error.message) ? err.result.error.message : (err ? (err.message || JSON.stringify(err)) : "Không có thông tin chi tiết.");
-                    alert(`Đã xảy ra lỗi khi kết nối với Google Drive:\n\n${errorDetails}\n\nVui lòng kiểm tra lại cấu hình trên Google Cloud Console hoặc thử đăng xuất và đăng nhập lại.`);
-                    showApiStatus("Lỗi kết nối Drive", true);
-                }
-            }
+                };
 
-            // --- EVENT LISTENERS ---
-            adminLoginBtn.addEventListener('click', handleAuthClick);
-            adminLogoutBtn.addEventListener('click', handleSignoutClick);
-            studentRoleBtn.addEventListener('click', () => {
-                appState.currentRole = 'student';
-                if(!gapiInited || !gisInited || !dataFileId) {
-                    alert("Hệ thống chưa có đề thi nào. Vui lòng yêu cầu quản trị viên đăng nhập và tạo đề trước.");
-                    return;
-                }
-                renderStudentExamList();
-                showView('student');
-            });
-            backToRoleBtns.forEach(btn => {
-                btn.addEventListener('click', () => {
-                    if(appState.currentRole === 'admin' && gapi.client.getToken() !== null){
-                       handleSignoutClick();
+                const startTimer = (durationMinutes) => {
+                    let timeLeft = durationMinutes * 60;
+                    clearInterval(appState.timerInterval);
+                    appState.timerInterval = setInterval(() => {
+                        timeLeft--;
+                        const minutes = Math.floor(timeLeft / 60);
+                        const seconds = timeLeft % 60;
+                        timerDisplay.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                        if (timeLeft <= 0) {
+                            clearInterval(appState.timerInterval);
+                            submitTest(true);
+                        }
+                    }, 1000);
+                };
+                
+                const collectAnswers = () => {
+                    const session = appState.currentTestSession;
+                    questionsContainer.querySelectorAll('.question-card').forEach(card => {
+                        const qId = card.dataset.questionId;
+                        const qType = card.dataset.questionType;
+                        let answer = null;
+                        switch(qType) {
+                            case 'multiple-choice':
+                                const checkedRadio = card.querySelector('input[type="radio"]:checked');
+                                if (checkedRadio) answer = checkedRadio.value;
+                                break;
+                            case 'true-false':
+                                answer = {};
+                                let hasTrueFalseAnswer = false;
+                                card.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                                    answer[cb.dataset.subId] = cb.checked;
+                                    hasTrueFalseAnswer = true;
+                                });
+                                if (!hasTrueFalseAnswer) answer = null;
+                                break;
+                            case 'short-answer':
+                                const input = card.querySelector('input[type="text"]');
+                                if (input && input.value.trim() !== '') answer = input.value.trim();
+                                break;
+                        }
+                        session.answers[qId] = answer;
+                    });
+                };
+
+                const submitTest = (isAutoSubmit = false) => {
+                     if(!isAutoSubmit) {
+                        const existingModal = document.getElementById('custom-confirm-modal');
+                        if (existingModal) return;
+                        const modal = document.createElement('div');
+                        modal.id = 'custom-confirm-modal';
+                        modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop';
+                        modal.innerHTML = `
+                            <div class="bg-white rounded-xl shadow-2xl p-8 w-full max-w-md text-center">
+                                <h2 class="text-2xl font-bold mb-4">Xác Nhận Nộp Bài</h2>
+                                <p class="text-slate-600 mb-8">Bạn có chắc chắn muốn kết thúc và nộp bài thi không?</p>
+                                <div class="flex justify-center gap-4">
+                                    <button id="confirm-yes-btn" class="px-8 py-3 bg-red-600 text-white font-semibold rounded-lg shadow-md hover:bg-red-700">Nộp Bài</button>
+                                    <button id="confirm-no-btn" class="px-8 py-3 bg-slate-200 text-slate-800 font-semibold rounded-lg shadow-md hover:bg-slate-300">Hủy</button>
+                                </div>
+                            </div>
+                        `;
+                        document.body.appendChild(modal);
+                        document.getElementById('confirm-yes-btn').onclick = () => {
+                            modal.remove();
+                            finishTest();
+                        };
+                        document.getElementById('confirm-no-btn').onclick = () => {
+                            modal.remove();
+                        };
                     } else {
+                         alert("Hết giờ làm bài! Bài thi sẽ được nộp tự động.");
+                         finishTest();
+                    }
+                };
+                
+                const finishTest = async () => {
+                    clearInterval(appState.timerInterval);
+                    collectAnswers();
+                    const session = appState.currentTestSession;
+                    const exam = appState.exams.find(e => e.id === session.examId);
+                    let totalScore = 0;
+                    let maxScore = 0;
+                    const reviewData = exam.questions.map((q, index) => {
+                        const userAnswer = session.answers[q.id];
+                        const correctAnswer = q.answer;
+                        let questionScore = 0;
+                        let isCorrect = false;
+                        let userAnswerText = 'Chưa trả lời';
+                        let correctAnswerText = '';
+                        switch(q.type) {
+                            case 'multiple-choice':
+                                maxScore += 0.25;
+                                isCorrect = userAnswer == correctAnswer;
+                                if (isCorrect) questionScore = 0.25;
+                                if(userAnswer !== null) userAnswerText = `${String.fromCharCode(65 + parseInt(userAnswer))}. ${q.options[userAnswer]}`;
+                                correctAnswerText = `${String.fromCharCode(65 + parseInt(correctAnswer))}. ${q.options[correctAnswer]}`;
+                                break;
+                            case 'true-false':
+                                maxScore += 1.0;
+                                let correctSubAnswers = 0;
+                                if (userAnswer) {
+                                    userAnswerText = q.sub_questions.map(sq => `${sq.id}: ${userAnswer[sq.id] ? 'Đúng' : 'Sai'}`).join('; ');
+                                    for(const subId in correctAnswer) {
+                                        if((userAnswer[subId] || false) === correctAnswer[subId]) {
+                                            correctSubAnswers++;
+                                        }
+                                    }
+                                }
+                                if (correctSubAnswers === 1) questionScore = 0.1;
+                                else if (correctSubAnswers === 2) questionScore = 0.25;
+                                else if (correctSubAnswers === 3) questionScore = 0.5;
+                                else if (correctSubAnswers === 4) questionScore = 1.0;
+                                isCorrect = correctSubAnswers === 4;
+                                correctAnswerText = q.sub_questions.map(sq => `${sq.id}: ${correctAnswer[sq.id] ? 'Đúng' : 'Sai'}`).join('; ');
+                                break;
+                            case 'short-answer':
+                                 maxScore += 0.5;
+                                isCorrect = userAnswer && correctAnswer && userAnswer.toLowerCase().trim() === correctAnswer.toLowerCase().trim();
+                                 if (isCorrect) questionScore = 0.5;
+                                if (userAnswer) userAnswerText = userAnswer;
+                                correctAnswerText = correctAnswer;
+                                break;
+                        }
+                        totalScore += questionScore;
+                        return { ...q, index: index + 1, userAnswer, correctAnswer, isCorrect };
+                    });
+                    renderResults(totalScore, maxScore, reviewData);
+                    showView('results');
+                    try {
+                        const timestamp = new Date().toLocaleString('vi-VN');
+                        const values = [[
+                            timestamp,
+                            session.studentName,
+                            exam.title,
+                            Number(totalScore.toFixed(2)),
+                        ]];
+                        await gapi.client.sheets.spreadsheets.values.append({
+                            spreadsheetId: SPREADSHEET_ID,
+                            range: 'A1',
+                            valueInputOption: 'USER_ENTERED',
+                            resource: { values: values },
+                        });
+                    } catch (err) {
+                        console.error("Error writing to sheet:", err);
+                        alert("Không thể lưu điểm của bạn lên Google Sheets. Vui lòng kiểm tra lại cấu hình API của quản trị viên.");
+                    }
+                }
+
+                const renderResults = (score, total, reviewData) => {
+                    const scoreDisplay = document.getElementById('score-display');
+                    const reviewContainer = document.getElementById('review-container');
+                    const resultIcon = document.getElementById('result-icon');
+                    const resultTitle = document.getElementById('result-title');
+                    scoreDisplay.textContent = `${Number(score.toFixed(2))}/${Number(total.toFixed(2))}`;
+                    const percentage = total > 0 ? (score / total) * 100 : 0;
+                    if (percentage >= 80) {
+                        resultTitle.textContent = "Xuất sắc!";
+                        resultIcon.className = "fas fa-trophy text-7xl mb-4 text-yellow-400";
+                    } else if (percentage >= 50) {
+                        resultTitle.textContent = "Làm tốt lắm!";
+                        resultIcon.className = "fas fa-award text-7xl mb-4 text-blue-500";
+                    } else {
+                        resultTitle.textContent = "Cần cố gắng hơn!";
+                        resultIcon.className = "fas fa-book-reader text-7xl mb-4 text-orange-500";
+                    }
+                    reviewContainer.innerHTML = reviewData.map(item => {
+                        let userAnswerText = (item.userAnswer !== null && item.userAnswer !== undefined) ? item.userAnswer : 'Chưa trả lời';
+                        let correctAnswerText = (item.correctAnswer !== null && item.correctAnswer !== undefined) ? item.correctAnswer : '';
+                        if(item.type === 'multiple-choice'){
+                            userAnswerText = (item.userAnswer !== 'Chưa trả lời' && typeof item.options[parseInt(item.userAnswer)] !== 'undefined') ? `<span class="font-bold mr-1">${String.fromCharCode(65 + parseInt(item.userAnswer))}.</span> ${item.options[item.userAnswer]}` : 'Chưa trả lời';
+                            correctAnswerText = (typeof item.options[parseInt(item.correctAnswer)] !== 'undefined') ? `<span class="font-bold mr-1">${String.fromCharCode(65 + parseInt(item.correctAnswer))}.</span> ${item.options[item.correctAnswer]}` : '';
+                        } else if (item.type === 'true-false' && item.userAnswer !== 'Chưa trả lời') {
+                             userAnswerText = item.sub_questions.map(sq => `<span>${sq.id}: <strong>${item.userAnswer[sq.id] ? 'Đúng' : 'Sai'}</strong></span>`).join('<br>');
+                             correctAnswerText = item.sub_questions.map(sq => `<span>${sq.id}: <strong>${item.correctAnswer[sq.id] ? 'Đúng' : 'Sai'}</strong></span>`).join('<br>');
+                        }
+                        return `
+                        <div class="p-3 border rounded-lg ${item.isCorrect ? 'border-green-300 bg-green-50' : 'border-red-300 bg-red-50'}">
+                            <div class="flex justify-between items-start">
+                                 <p class="font-bold mb-2 flex-1">Câu ${item.index}: <span class="math-content">${item.content}</span></p>
+                            </div>
+                            <div class="text-sm space-y-1">
+                                <div><strong>Bạn chọn:</strong> <div class="math-content inline-block ml-2 p-1 rounded ${item.isCorrect ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${userAnswerText}</div></div>
+                                ${!item.isCorrect ? `<div><strong>Đáp án đúng:</strong> <div class="math-content inline-block ml-2 p-1 rounded bg-green-100 text-green-800">${correctAnswerText}</div></div>` : ''}
+                            </div>
+                        </div>
+                    `}).join('');
+                    if(window.MathJax) {
+                        window.MathJax.typesetPromise();
+                    }
+                };
+                
+                async function handleAuthClick() {
+                    tokenClient.callback = async (resp) => {
+                        if (resp.error !== undefined) {
+                            const errorDetails = resp.error_description || JSON.stringify(resp);
+                            alert(`Đã xảy ra lỗi khi đăng nhập:\n\n${errorDetails}`);
+                            console.error("Authentication error:", resp);
+                            return;
+                        }
+                        await initializeAdminSession();
+                    };
+                    if (gapi.client.getToken() === null) {
+                        tokenClient.requestAccessToken({ prompt: 'consent' });
+                    } else {
+                        tokenClient.requestAccessToken({ prompt: '' });
+                    }
+                }
+                
+                function handleSignoutClick() {
+                    const token = gapi.client.getToken();
+                    if (token !== null) {
+                        google.accounts.oauth2.revoke(token.access_token);
+                        gapi.client.setToken('');
                         appState.currentRole = null;
+                        localStorage.removeItem('dataFileId');
+                        dataFileId = null;
+                        document.getElementById('admin-email').textContent = '';
                         showView('roleSelection');
                     }
-                });
-            });
-            createNewExamBtn.addEventListener('click', () => {
-                const newExam = { id: `exam-${Date.now()}`, title: "Đề thi không tiêu đề", duration: 90, questions: [] };
-                appState.exams.push(newExam);
-                renderAdminExamList();
-                openExamEditor(newExam.id);
-            });
-            uploadBtn.addEventListener('click', () => examFileInput.click());
-            examFileInput.addEventListener('change', (e) => {
-                if (e.target.files.length > 0) {
-                    handleFileUpload(e.target.files[0]);
-                    e.target.value = null;
                 }
-            });
-            adminExamList.addEventListener('click', (e) => {
-                const editBtn = e.target.closest('.edit-exam-btn');
-                const delBtn = e.target.closest('.delete-exam-btn');
-                if (editBtn) openExamEditor(editBtn.dataset.examId);
-                if (delBtn) deleteExam(delBtn.dataset.examId);
-            });
-            closeEditorModalBtn.addEventListener('click', () => examEditorModal.classList.add('hidden'));
-            saveExamBtn.addEventListener('click', saveExam);
-            addQuestionBtn.addEventListener('click', () => addQuestionToEditor());
-            editorQuestionsContainer.addEventListener('click', (e) => {
-                const deleteBtn = e.target.closest('.delete-question-btn');
-                if (deleteBtn) {
-                    deleteBtn.closest('.question-editor-block').remove();
-                }
-                const addImageBtn = e.target.closest('.add-image-btn');
-                if (addImageBtn) {
-                    addImageBtn.previousElementSibling.click();
-                }
-            });
-            editorQuestionsContainer.addEventListener('change', (e) => {
-                if (e.target.classList.contains('question-type-select')) {
-                    const questionBlock = e.target.closest('.question-editor-block');
-                    renderAnswerEditor(questionBlock, e.target.value, null);
-                }
-                if (e.target.classList.contains('image-input')) {
-                    const file = e.target.files[0];
-                    if (file) {
-                        const reader = new FileReader();
-                        reader.onload = (event) => {
-                            const previewContainer = e.target.closest('.image-editor-container').querySelector('.image-preview-container');
-                            previewContainer.innerHTML = `<img src="${event.target.result}" class="max-w-xs max-h-40 border rounded p-1">`;
-                            e.target.closest('.image-editor-container').querySelector('.add-image-btn').innerHTML = `<i class="fas fa-image mr-1"></i> Thay đổi Hình Ảnh`;
-                        };
-                        reader.readAsDataURL(file);
+                
+                 async function findOrCreateFolder() {
+                    const response = await gapi.client.drive.files.list({
+                        q: `mimeType='application/vnd.google-apps.folder' and name='${FOLDER_NAME}' and trashed=false`,
+                        fields: 'files(id, name)',
+                    });
+                    if (response.result.files.length > 0) {
+                        return response.result.files[0].id;
+                    } else {
+                        const createResponse = await gapi.client.drive.files.create({
+                            resource: { name: FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' },
+                            fields: 'id',
+                        });
+                        return createResponse.result.id;
                     }
                 }
-            });
-            studentExamList.addEventListener('click', (e) => {
-                const takeBtn = e.target.closest('.take-exam-btn');
-                if (takeBtn) openStudentNameModal(takeBtn.dataset.examId);
-            });
-            startExamBtn.addEventListener('click', () => {
-                const studentName = studentNameInput.value.trim();
-                if (!studentName) {
-                    alert('Vui lòng nhập họ và tên.');
-                    return;
-                }
-                const examId = studentNameModal.dataset.examId;
-                studentNameModal.classList.add('hidden');
-                studentNameInput.value = '';
-                startTest(examId, studentName);
-            });
-            qNavContainer.addEventListener('click', (e) => {
-                const navBtn = e.target.closest('.question-nav-item');
-                if (navBtn) {
-                    document.getElementById(navBtn.dataset.targetId).scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }
-            });
-            questionsContainer.addEventListener('change', () => {
-                collectAnswers();
-                updateQuestionNav();
-            });
-            submitTestBtn.addEventListener('click', () => {
-                submitTest(false);
-            });
-            backToStudentViewBtn.addEventListener('click', () => {
-                renderStudentExamList();
-                showView('student');
-            });
-            
-            // --- INITIALIZATION ---
-            showView('roleSelection');
-        }
 
+                async function findOrCreateFile(folderId) {
+                    const response = await gapi.client.drive.files.list({
+                        q: `'${folderId}' in parents and name='${FILE_NAME}' and trashed=false`,
+                        fields: 'files(id, name)',
+                    });
+                    if (response.result.files.length > 0) {
+                        return response.result.files[0].id;
+                    } else {
+                        const createResponse = await gapi.client.drive.files.create({
+                            resource: { name: FILE_NAME, mimeType: 'application/json', parents: [folderId] },
+                            fields: 'id',
+                        });
+                        return createResponse.result.id;
+                    }
+                }
+                
+                async function loadDriveData() {
+                     try {
+                         const response = await gapi.client.drive.files.get({
+                             fileId: dataFileId,
+                             alt: 'media',
+                         });
+                         if (response.body && response.body.length > 0) {
+                            appState.exams = JSON.parse(response.body);
+                         } else {
+                            appState.exams = []; // File is empty, initialize with an empty array
+                         }
+                     } catch (err) {
+                        console.error("Error loading file content:", err);
+                        if (err.status === 404) {
+                            appState.exams = [];
+                            await saveData(); // Create a new empty file
+                        } else {
+                            throw err; // Re-throw other errors to be caught by the caller
+                        }
+                     }
+                     renderAdminExamList();
+                     renderStudentExamList();
+                }
+                
+                async function initializeAdminSession() {
+                    // Change view FIRST
+                    appState.currentRole = 'admin';
+                    showView('admin');
+                    renderAdminExamList();
+
+                    try {
+                        const userResponse = await gapi.client.request({
+                            path: 'https://www.googleapis.com/oauth2/v3/userinfo'
+                        });
+                        document.getElementById('admin-email').textContent = `Đăng nhập: ${userResponse.result.email}`;
+                        
+                        const folderId = await findOrCreateFolder();
+                        dataFileId = await findOrCreateFile(folderId);
+                        localStorage.setItem('dataFileId', dataFileId);
+                        
+                        await loadDriveData();
+                    } catch (err) {
+                        console.error("Error during admin session initialization:", err);
+                        const errorDetails = (err && err.result && err.result.error && err.result.error.message) ? err.result.error.message : (err ? (err.message || JSON.stringify(err)) : "Không có thông tin chi tiết.");
+                        alert(`Đã xảy ra lỗi khi kết nối với Google Drive:\n\n${errorDetails}\n\nVui lòng kiểm tra lại cấu hình trên Google Cloud Console hoặc thử đăng xuất và đăng nhập lại.`);
+                        showApiStatus("Lỗi kết nối Drive", true);
+                    }
+                }
+
+                // --- EVENT LISTENERS ---
+                adminLoginBtn.addEventListener('click', handleAuthClick);
+                adminLogoutBtn.addEventListener('click', handleSignoutClick);
+                studentRoleBtn.addEventListener('click', () => {
+                    appState.currentRole = 'student';
+                    if(!dataFileId) {
+                         alert("Hệ thống chưa có đề thi nào. Vui lòng yêu cầu quản trị viên đăng nhập và tạo đề trước.");
+                        return;
+                    }
+                    // For students, we'll try to load the data directly
+                    // This requires the data file on Drive to be public
+                    // A more secure way would be a backend, but for this client-only app:
+                    gapi.client.drive.files.get({
+                        fileId: dataFileId,
+                        alt: 'media'
+                    }).then((response) => {
+                         if (response.body && response.body.length > 0) {
+                            appState.exams = JSON.parse(response.body);
+                         } else {
+                            appState.exams = [];
+                         }
+                         renderStudentExamList();
+                         showView('student');
+                    }).catch(err => {
+                        console.error("Student could not load exam data:", err);
+                        alert("Không thể tải danh sách đề thi. Vui lòng yêu cầu quản trị viên kiểm tra lại.")
+                    });
+                });
+                backToRoleBtns.forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        if(appState.currentRole === 'admin' && gapi.client.getToken() !== null){
+                           handleSignoutClick();
+                        } else {
+                            appState.currentRole = null;
+                            showView('roleSelection');
+                        }
+                    });
+                });
+                createNewExamBtn.addEventListener('click', () => {
+                    const newExam = { id: `exam-${Date.now()}`, title: "Đề thi không tiêu đề", duration: 90, questions: [] };
+                    appState.exams.push(newExam);
+                    renderAdminExamList();
+                    openExamEditor(newExam.id);
+                });
+                uploadBtn.addEventListener('click', () => examFileInput.click());
+                examFileInput.addEventListener('change', (e) => {
+                    if (e.target.files.length > 0) {
+                        handleFileUpload(e.target.files[0]);
+                        e.target.value = null;
+                    }
+                });
+                adminExamList.addEventListener('click', (e) => {
+                    const editBtn = e.target.closest('.edit-exam-btn');
+                    const delBtn = e.target.closest('.delete-exam-btn');
+                    if (editBtn) openExamEditor(editBtn.dataset.examId);
+                    if (delBtn) deleteExam(delBtn.dataset.examId);
+                });
+                closeEditorModalBtn.addEventListener('click', () => examEditorModal.classList.add('hidden'));
+                saveExamBtn.addEventListener('click', saveExam);
+                addQuestionBtn.addEventListener('click', () => addQuestionToEditor());
+                editorQuestionsContainer.addEventListener('click', (e) => {
+                    const deleteBtn = e.target.closest('.delete-question-btn');
+                    if (deleteBtn) {
+                        deleteBtn.closest('.question-editor-block').remove();
+                    }
+                    const addImageBtn = e.target.closest('.add-image-btn');
+                    if (addImageBtn) {
+                        addImageBtn.previousElementSibling.click();
+                    }
+                });
+                editorQuestionsContainer.addEventListener('change', (e) => {
+                    if (e.target.classList.contains('question-type-select')) {
+                        const questionBlock = e.target.closest('.question-editor-block');
+                        renderAnswerEditor(questionBlock, e.target.value, null);
+                    }
+                    if (e.target.classList.contains('image-input')) {
+                        const file = e.target.files[0];
+                        if (file) {
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                                const previewContainer = e.target.closest('.image-editor-container').querySelector('.image-preview-container');
+                                previewContainer.innerHTML = `<img src="${event.target.result}" class="max-w-xs max-h-40 border rounded p-1">`;
+                                e.target.closest('.image-editor-container').querySelector('.add-image-btn').innerHTML = `<i class="fas fa-image mr-1"></i> Thay đổi Hình Ảnh`;
+                            };
+                            reader.readAsDataURL(file);
+                        }
+                    }
+                });
+                studentExamList.addEventListener('click', (e) => {
+                    const takeBtn = e.target.closest('.take-exam-btn');
+                    if (takeBtn) openStudentNameModal(takeBtn.dataset.examId);
+                });
+                startExamBtn.addEventListener('click', () => {
+                    const studentName = studentNameInput.value.trim();
+                    if (!studentName) {
+                        alert('Vui lòng nhập họ và tên.');
+                        return;
+                    }
+                    const examId = studentNameModal.dataset.examId;
+                    studentNameModal.classList.add('hidden');
+                    studentNameInput.value = '';
+                    startTest(examId, studentName);
+                });
+                qNavContainer.addEventListener('click', (e) => {
+                    const navBtn = e.target.closest('.question-nav-item');
+                    if (navBtn) {
+                        document.getElementById(navBtn.dataset.targetId).scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                });
+                questionsContainer.addEventListener('change', () => {
+                    collectAnswers();
+                    updateQuestionNav();
+                });
+                submitTestBtn.addEventListener('click', () => {
+                    submitTest(false);
+                });
+                backToStudentViewBtn.addEventListener('click', () => {
+                    renderStudentExamList();
+                    showView('student');
+                });
+                
+                // --- INITIALIZATION ---
+                showView('roleSelection');
+            }
+
+        }
     </script>
 </body>
 </html>
