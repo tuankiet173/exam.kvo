@@ -345,8 +345,8 @@
         }
 
         function gisLoaded() {
-            const CLIENT_ID = '733612776249-qq9ctsimofokdklhlsp5ih8jrfj2b202.apps.googleusercontent.com';
-             if (CLIENT_ID === 'YOUR_CLIENT_ID') return;
+            const CLIENT_ID = '733612776249-q958bve74pf9k893oeen74649q2p45sk.apps.googleusercontent.com';
+            if (CLIENT_ID === 'YOUR_CLIENT_ID') return;
             
             tokenClient = google.accounts.oauth2.initTokenClient({
                 client_id: CLIENT_ID,
@@ -357,7 +357,7 @@
             initializeAppIfReady();
         }
 
-        const API_KEY = 'AIzaSyCHRHV_zHOOCGyWER46KNvIJ1-t95i3pws';
+        const API_KEY = 'AIzaSyDsEHy2K-N0qc1JIEz0jDmaemkMcoRUQkc';
         const SPREADSHEET_ID = '13Clyp6ftJjJl0BA9l9J4wpc3Ii7w8thvLxlLEGlXy4c';
         const DISCOVERY_DOCS = [
             "https://www.googleapis.com/discovery/v1/apis/drive/v3/rest",
@@ -385,6 +385,7 @@
         });
 
         function initializeAppIfReady() {
+            // This function ensures the app only runs when all parts are ready.
             if (gapiInited && gisInited && domReady) {
                 initializeApp();
             }
