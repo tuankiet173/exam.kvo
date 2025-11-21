@@ -971,7 +971,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     </div>
                 </div>`;
             }).join('');
-        }
         } else if (q.question_type === 'short_answer') {
             optionsHtml = `<input type="text" id="student_answer_${currentQuestionIndex}" value="${savedAnswer || ''}" class="mt-2 w-full p-2 border border-slate-300 rounded-lg" placeholder="Nhập đáp án..." oninput="saveStudentAnswer()">`;
         }
