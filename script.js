@@ -274,7 +274,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // *** VIẾT LẠI HÀM LƯU ĐỀ THI ***
+    // *** VIẾT LẠI HÀM LƯU ĐỀ THI – BẢO ĐẢM LƯU ĐÚNG ĐÁP ÁN ***
     async function saveExam() {
         const saveButton = document.getElementById('save-exam-button');
         const loader = document.getElementById('save-loader');
@@ -284,82 +284,121 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const examTitle = document.getElementById('exam-title').value.trim();
             const timeLimit = parseInt(document.getElementById('exam-time-limit').value, 10);
+
             if (!examTitle || !timeLimit) {
                 alert('Vui lòng nhập đầy đủ Tiêu đề và Thời gian làm bài.');
                 return;
             }
+
             const settings = {
                 showScore: document.querySelector('input[name="showScoreOption"]:checked').value,
                 allowReview: document.querySelector('input[name="allowReviewOption"]:checked').value,
                 attempts: document.querySelector('input[name="attemptsOption"]:checked').value
             };
 
-            // Chuẩn bị dữ liệu câu hỏi (giống code cũ)
+            // 1. Chuẩn bị dữ liệu câu hỏi
             const questionsData = [];
-            for (let i = 0; i < parsedQuestions.length; i++) {
-                 // ... (lấy content, points, correct_answer như cũ) ...
-                 const q = parsedQuestions[i];
-                 const content = document.getElementById(`content_${i}`).innerHTML;
-                 const points = parseFloat(document.getElementById(`points_${i}`).value);
-                 let correct_answer = {};
-                 // ... (logic lấy đáp án đúng như cũ) ...
-                 if (q.question_type === 'multiple_choice') { /*...*/ }
-                 else if (q.question_type === 'short_answer') { /*...*/ }
-                 else if (q.question_type === 'true_false') { /*...*/ }
 
-                 // Quan trọng: Bỏ trường 'id' nếu có từ lần edit trước
-                 const { id, imageUrl, ...questionPayload } = q;
-                 questionsData.push({ ...questionPayload, content, points, correct_answer, order: i });
+            for (let i = 0; i < parsedQuestions.length; i++) {
+                const q = parsedQuestions[i];
+
+                // Nội dung câu hỏi (bao gồm cả <img> nếu có)
+                const contentEl = document.getElementById(`content_${i}`);
+                const content = contentEl ? contentEl.innerHTML : (q.content || '');
+
+                // Điểm số
+                const pointsInput = document.getElementById(`points_${i}`);
+                let points = pointsInput ? parseFloat(pointsInput.value) : q.points;
+                if (isNaN(points)) points = 0;
+
+                // Lấy đáp án đúng
+                let correct_answer = null;
+
+                if (q.question_type === 'multiple_choice') {
+                    // GV chọn 1 đáp án đúng bằng radio: name="answer_i"
+                    const checked = document.querySelector(`input[name="answer_${i}"]:checked`);
+                    if (checked) {
+                        correct_answer = { answer: checked.value }; // ví dụ { answer: 'A' }
+                    }
+                } else if (q.question_type === 'short_answer') {
+                    // GV nhập đáp án text: id="answer_i"
+                    const ansInput = document.getElementById(`answer_${i}`);
+                    const ans = ansInput ? ansInput.value.trim() : '';
+                    correct_answer = { answer: ans };
+                } else if (q.question_type === 'true_false') {
+                    // Mỗi mệnh đề a,b,c,d có 2 radio: name="answer_i_a", "answer_i_b", ...
+                    const tfAnswer = {};
+                    (q.options || []).forEach(({ key }) => {
+                        const checked = document.querySelector(
+                            `input[name="answer_${i}_${key}"]:checked`
+                        );
+                        if (checked) {
+                            tfAnswer[key] = checked.value; // 'Đúng' hoặc 'Sai'
+                        }
+                    });
+                    correct_answer = Object.keys(tfAnswer).length > 0 ? tfAnswer : null;
+                }
+
+                // Bỏ id (và imageUrl nếu có) để tránh đụng PK / cột không tồn tại
+                const { id, imageUrl, ...questionPayload } = q;
+
+                questionsData.push({
+                    ...questionPayload,
+                    content,
+                    points,
+                    correct_answer,
+                    order: i
+                });
             }
 
+            // 2. Payload đề thi
             const examPayload = {
                 title: examTitle,
                 timeLimit: timeLimit,
                 questionCount: questionsData.length,
-                // createdAt sẽ tự động được set bởi Supabase nếu cấu hình default value
                 isOpen: true,
                 settings: settings
-                // lastAnswerUpdate có thể thêm nếu cần Cloud Functions (hiện tại chưa cần)
             };
 
             let examId = currentEditingExamId;
 
-            if (examId) { // Chế độ: Cập nhật đề thi
-                // 1. Cập nhật thông tin đề thi
+            // 3. Tạo mới hoặc cập nhật đề thi
+            if (examId) {
+                // Cập nhật thông tin đề
                 const { error: updateExamError } = await supabase
                     .from('exams')
                     .update(examPayload)
                     .eq('id', examId);
                 if (updateExamError) throw updateExamError;
 
-                // 2. Xóa các câu hỏi cũ (cần examId)
+                // Xóa toàn bộ câu hỏi cũ của đề này
                 const { error: deleteQuestionsError } = await supabase
                     .from('questions')
                     .delete()
                     .eq('exam_id', examId);
                 if (deleteQuestionsError) throw deleteQuestionsError;
-
-            } else { // Chế độ: Tạo đề thi mới
-                // 1. Tạo đề thi mới và lấy id
+            } else {
+                // Tạo đề thi mới
                 const { data: newExamData, error: insertExamError } = await supabase
                     .from('exams')
                     .insert(examPayload)
-                    .select('id') // Yêu cầu trả về id của bản ghi mới
-                    .single(); // Chỉ mong đợi 1 kết quả
+                    .select('id')
+                    .single();
 
                 if (insertExamError) throw insertExamError;
-                if (!newExamData || !newExamData.id) throw new Error("Không thể tạo đề thi mới.");
+                if (!newExamData || !newExamData.id) {
+                    throw new Error("Không thể tạo đề thi mới.");
+                }
                 examId = newExamData.id;
             }
 
-            // 3. Thêm các câu hỏi mới (cho cả tạo mới và cập nhật)
-            // Gán exam_id cho từng câu hỏi
+            // 4. Thêm lại toàn bộ câu hỏi với exam_id mới
             const questionsWithExamId = questionsData.map(q => ({ ...q, exam_id: examId }));
             const { error: insertQuestionsError } = await supabase
                 .from('questions')
                 .insert(questionsWithExamId);
-            if (insertQuestionsError) throw insertQuestionsError;
 
+            if (insertQuestionsError) throw insertQuestionsError;
 
             alert('Lưu đề thi thành công!');
             showView('teacher-dashboard-view');
@@ -372,6 +411,7 @@ document.addEventListener('DOMContentLoaded', function() {
             loader.style.display = 'none';
         }
     }
+
 
     // *** VIẾT LẠI HÀM SỬA ĐỀ THI ***
     async function editExam(examId) {
@@ -922,7 +962,6 @@ document.addEventListener('DOMContentLoaded', function() {
                     </div>
                     <div class="flex items-center gap-x-2">
 
-                        <!-- Nút ĐÚNG -->
                         <div>
                             <input
                                 type="radio"
