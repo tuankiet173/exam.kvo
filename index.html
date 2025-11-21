@@ -134,9 +134,31 @@
         </div>
 
         <div id="teacher-results-view" class="view">
-            <div class="flex justify-between items-center mb-6"><div><h2 class="text-3xl font-bold text-indigo-600">Kết quả thi</h2><p id="results-exam-title" class="text-slate-600"></p></div><button onclick="showView('teacher-dashboard-view')" class="text-sm text-slate-600 hover:underline">Quay lại</button></div>
-            <div class="bg-white p-6 rounded-xl shadow-lg border"><div id="results-loader" class="loader mx-auto hidden"></div><table class="min-w-full hidden" id="results-table"><thead class="bg-slate-50"><tr><th scope="col" class="px-6 py-3 text-left text-xs font-medium uppercase">STT</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium uppercase">Tên Học sinh</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium uppercase">Thời gian nộp</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium uppercase">Điểm số</th><th scope="col" class="px-6 py-3 text-left text-xs font-medium uppercase th-action">Hành động</th></tr></thead><tbody id="results-table-body"></tbody></table><p id="no-results-message" class="text-slate-500 hidden text-center py-8">Chưa có ai làm bài thi này.</p></div>
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h2 class="text-3xl font-bold text-indigo-600">Kết quả thi</h2>
+                    <p id="results-exam-title" class="text-slate-600"></p>
+                </div>
+                <button onclick="showView('teacher-dashboard-view')" class="text-sm text-slate-600 hover:underline">Quay lại</button>
+            </div>
+
+            <button
+                onclick="recalculateScores(currentViewingResults.examId)"
+                class="mb-4 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700">
+                🔄 Cập nhật lại điểm theo đáp án mới
+            </button>
+
+            <div class="bg-white p-6 rounded-xl shadow-lg border">
+                <div id="results-loader" class="loader mx-auto hidden"></div>
+                <table class="min-w-full hidden" id="results-table">
+                    ...
+                </table>
+                <p id="no-results-message" class="text-slate-500 hidden text-center py-8">
+                    Chưa có ai làm bài thi này.
+                </p>
+            </div>
         </div>
+
 
         <div id="student-portal-view" class="view">
             <div class="flex justify-between items-center mb-6">

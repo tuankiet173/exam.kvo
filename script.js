@@ -1122,7 +1122,69 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // Các hàm tiện ích (showModal, hideModal, toggleRadio, handleBeforeUnload) giữ nguyên
+    async function recalculateScores(examId) {
+        if (!confirm("Bạn có chắc muốn tính lại toàn bộ điểm theo đáp án mới không?")) return;
+
+        // 1. Lấy danh sách câu hỏi
+        const { data: questions, error: qErr } = await supabase
+            .from('questions')
+            .select('*')
+            .eq('exam_id', examId);
+
+        if (qErr) {
+            alert("Lỗi tải câu hỏi: " + qErr.message);
+            return;
+        }
+
+        // 2. Lấy toàn bộ bài làm
+        const { data: submissions, error: sErr } = await supabase
+            .from('submissions')
+            .select('*')
+            .eq('exam_id', examId);
+
+        if (sErr) {
+            alert("Lỗi tải bài làm: " + sErr.message);
+            return;
+        }
+
+        // 3. Tính lại điểm cho từng bài
+        for (const s of submissions) {
+            let score = 0;
+
+            questions.forEach((q, index) => {
+                const studentAns = s.answers[index];
+                const correct = q.correct_answer;
+
+                if (!studentAns || !correct) return;
+
+                if (q.question_type === 'multiple_choice') {
+                    if (studentAns === correct.answer) score += q.points;
+                }
+                else if (q.question_type === 'true_false') {
+                    const isCorrect = Object.keys(correct)
+                        .every(k => studentAns[k] === correct[k]);
+                    if (isCorrect) score += q.points;
+                }
+                else if (q.question_type === 'short_answer') {
+                    if (String(studentAns).trim().toLowerCase() === 
+                        String(correct.answer).trim().toLowerCase()) {
+                        score += q.points;
+                    }
+                }
+            });
+
+            // 4. Lưu lại điểm
+            await supabase
+                .from('submissions')
+                .update({ score })
+                .eq('id', s.id);
+        }
+
+        alert("Đã cập nhật lại toàn bộ điểm theo đáp án mới!");
+    }
+
+
+    // Các hàm tiện ích
     function showModal(title, message, onConfirm) {
         document.getElementById('modal-title').textContent = title;
         const msgEl = document.getElementById('modal-message');
@@ -1308,4 +1370,5 @@ document.addEventListener('DOMContentLoaded', function() {
     window.showReview = showReview;
     // window.renderReview = renderReview; // Hàm nội bộ
     window.viewOldReview = viewOldReview;
+    window.recalculateScores = recalculateScores;
 });
