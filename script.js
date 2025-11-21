@@ -914,8 +914,64 @@ document.addEventListener('DOMContentLoaded', function() {
                 const savedChoice = savedAnswer ? savedAnswer[key] : null;
                 const isTrueChecked = savedChoice === 'Đúng';
                 const isFalseChecked = savedChoice === 'Sai';
-                return `<div class="flex items-center justify-between my-1 py-2 px-3 rounded-lg"><div class="math-container text-slate-700 mr-4">${key}) ${value}</div><div class="flex items-center gap-x-2"><div><input type="radio" name="student_answer_${currentQuestionIndex}_${key}" value="Đúng" id="stud_ans_${currentQuestionIndex}_${key}_true" class="hidden peer" onclick="toggleRadio(this)" ${isTrueChecked ? 'checked' : ''} data-was-checked="${isTrueChecked}"><label for="stud_ans_${currentQuestionIndex}_${key}_true" class="cursor-pointer py-2 px-5 text-sm font-medium rounded-full border border-slate-300 bg-white text-slate-600 peer-checked:bg-green-600 peer-checked:text-white peer-checked:border-green-600">Đúng</label></div><div><input type="radio" name="student_answer_${currentQuestionIndex}_${key}" value="Sai" id="stud_ans_${currentQuestionIndex}_${key}_false" class="hidden peer" onclick="toggleRadio(this)" ${isFalseChecked ? 'checked' : ''} data-was-checked="${isFalseChecked}"><label for="stud_ans_${currentQuestionIndex}_${key}_false" class="cursor-pointer py-2 px-5 text-sm font-medium rounded-full border border-slate-300 bg-white text-slate-600 peer-checked:bg-red-600 peer-checked:text-white peer-checked:border-red-600">Sai</label></div></div></div>`;
+
+                return `
+                <div class="flex items-center justify-between my-1 py-2 px-3 rounded-lg">
+                    <div class="math-container text-slate-700 mr-4">
+                        ${key}) ${value}
+                    </div>
+                    <div class="flex items-center gap-x-2">
+
+                        <!-- Nút ĐÚNG -->
+                        <div>
+                            <input
+                                type="radio"
+                                name="student_answer_${currentQuestionIndex}_${key}"
+                                value="Đúng"
+                                id="stud_ans_${currentQuestionIndex}_${key}_true"
+                                class="hidden peer"
+                                onclick="toggleRadio(this)"
+                                ${isTrueChecked ? 'checked' : ''}
+                                data-was-checked="${isTrueChecked}"
+                            >
+                            <label
+                                for="stud_ans_${currentQuestionIndex}_${key}_true"
+                                class="cursor-pointer py-2 px-5 text-sm font-medium rounded-full
+                                       border border-slate-300 bg-white text-slate-600
+                                       hover:bg-slate-100
+                                       peer-checked:bg-blue-600 peer-checked:text-white peer-checked:border-blue-600"
+                            >
+                                Đúng
+                            </label>
+                        </div>
+
+                        <!-- Nút SAI -->
+                        <div>
+                            <input
+                                type="radio"
+                                name="student_answer_${currentQuestionIndex}_${key}"
+                                value="Sai"
+                                id="stud_ans_${currentQuestionIndex}_${key}_false"
+                                class="hidden peer"
+                                onclick="toggleRadio(this)"
+                                ${isFalseChecked ? 'checked' : ''}
+                                data-was-checked="${isFalseChecked}"
+                            >
+                            <label
+                                for="stud_ans_${currentQuestionIndex}_${key}_false"
+                                class="cursor-pointer py-2 px-5 text-sm font-medium rounded-full
+                                       border border-slate-300 bg-white text-slate-600
+                                       hover:bg-slate-100
+                                       peer-checked:bg-blue-600 peer-checked:text-white peer-checked:border-blue-600"
+                            >
+                                Sai
+                            </label>
+                        </div>
+
+                    </div>
+                </div>`;
             }).join('');
+        }
         } else if (q.question_type === 'short_answer') {
             optionsHtml = `<input type="text" id="student_answer_${currentQuestionIndex}" value="${savedAnswer || ''}" class="mt-2 w-full p-2 border border-slate-300 rounded-lg" placeholder="Nhập đáp án..." oninput="saveStudentAnswer()">`;
         }
