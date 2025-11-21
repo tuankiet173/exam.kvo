@@ -948,7 +948,19 @@ document.addEventListener('DOMContentLoaded', function() {
         let optionsHtml = '';
         const savedAnswer = studentAnswers[currentQuestionIndex];
         if (q.question_type === 'multiple_choice') {
-            optionsHtml = q.options.map(({ key, value }) => `<div class="flex items-center my-2 p-2 rounded-lg hover:bg-slate-50"><input type="radio" name="student_answer_${currentQuestionIndex}" value="${key}" id="stud_ans_${currentQuestionIndex}_${key}" ${savedAnswer === key ? 'checked' : ''} data-was-checked="${savedAnswer === key}" class="mr-3 h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300" onclick="toggleRadio(this)"><label for="stud_ans_${currentQuestionIndex}_${key}" class="math-container w-full cursor-pointer font-times">${key}. ${value}</label></div>`).join('');
+            optionsHtml = q.options.map(({ key, value }) => `
+            <div class="flex items-center my-2 p-2 rounded-lg hover:bg-slate-50">
+                <input type="radio"
+                       name="answer_${i}"
+                       value="${key}"
+                       id="ans_${i}_${key}"
+                       class="mr-3 h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300">
+
+                <label for="ans_${i}_${key}" class="math-container cursor-pointer w-full">
+                    ${key}. ${value.replace(/^[A-D]\.\s*/i, '')}
+                </label>
+            </div>
+        `).join('');
         } else if (q.question_type === 'true_false') {
             optionsHtml = q.options.map(({ key, value }) => {
                 const savedChoice = savedAnswer ? savedAnswer[key] : null;
