@@ -1127,11 +1127,12 @@ document.addEventListener('DOMContentLoaded', function() {
     async function recalculateScores(examId) {
         if (!confirm("Bạn có chắc muốn tính lại toàn bộ điểm theo đáp án mới không?")) return;
 
-        // 1. Lấy danh sách câu hỏi
+        // 1. Lấy danh sách câu hỏi (nên sắp xếp theo "order" cho chắc)
         const { data: questions, error: qErr } = await supabase
             .from('questions')
             .select('*')
-            .eq('exam_id', examId);
+            .eq('exam_id', examId)
+            .order('order', { ascending: true });
 
         if (qErr) {
             alert("Lỗi tải câu hỏi: " + qErr.message);
@@ -1154,10 +1155,11 @@ document.addEventListener('DOMContentLoaded', function() {
             let score = 0;
 
             questions.forEach((q, index) => {
-                const studentAns = s.answers[index];
+                const answers = s.answers || [];
+                const studentAns = answers[index];
                 const correct = q.correct_answer;
 
-                if (!studentAns || !correct) return;
+                if (studentAns == null || !correct) return;
 
                 if (q.question_type === 'multiple_choice') {
                     if (studentAns === correct.answer) score += q.points;
@@ -1168,22 +1170,32 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (isCorrect) score += q.points;
                 }
                 else if (q.question_type === 'short_answer') {
-                    if (String(studentAns).trim().toLowerCase() === 
-                        String(correct.answer).trim().toLowerCase()) {
+                    if (
+                        String(studentAns).trim().toLowerCase() ===
+                        String(correct.answer).trim().toLowerCase()
+                    ) {
                         score += q.points;
                     }
                 }
             });
 
-            // 4. Lưu lại điểm
+            // N/A → 0 điểm
+            const safeScore = (score == null || isNaN(score)) ? 0 : score;
+
             await supabase
                 .from('submissions')
-                .update({ score: (score == null || isNaN(score)) ? 0 : score })
+                .update({ score: safeScore })
                 .eq('id', s.id);
         }
 
         alert("Đã cập nhật lại toàn bộ điểm theo đáp án mới!");
+
+        // Reload lại bảng kết quả để thấy điểm mới
+        if (window.currentViewingResults && window.currentViewingResults.examId === examId) {
+            await viewResults(window.currentViewingResults.examId, window.currentViewingResults.examTitle);
+        }
     }
+
 
 
     // Các hàm tiện ích
