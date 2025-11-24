@@ -540,7 +540,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">${index++}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-500">${result.studentName}</td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-500">${submissionTime}</td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-green-600">${result.score !== null ? result.score : 'N/A'}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-green-600">
+                            ${(result.score === null || result.score === "N/A") ? 0 : result.score}
+                        </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm">
                             <button onclick="confirmDeleteSubmission('${result.id}', '${result.studentName.replace(/'/g, "\\'")}')" class="text-red-600 hover:text-red-800 font-medium">Xóa</button>
                         </td>
@@ -1176,7 +1178,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // 4. Lưu lại điểm
             await supabase
                 .from('submissions')
-                .update({ score })
+                .update({ score: (score == null || isNaN(score)) ? 0 : score })
                 .eq('id', s.id);
         }
 
