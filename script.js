@@ -28,20 +28,21 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- QUẢN LÝ TRẠNG THÁI AUTHENTICATION (SUPABASE) ---
     supabase.auth.onAuthStateChange((event, session) => {
         const loadingView = document.getElementById('loading-view');
-        const teacherDashboardView = document.getElementById('teacher-dashboard-view');
-        
-        currentUser = session?.user || null; // Lấy thông tin user từ session
+
+        currentUser = session?.user || null;
 
         if (currentUser) {
-            // Người dùng đã đăng nhập
-            if (!teacherDashboardView || !teacherDashboardView.classList.contains('active-view')) {
-                 showStudentPortal(); // Chuyển đến trang học sinh
+            // Kiểm tra xem hiện tại đã có view nào đang active chưa
+            const activeView = document.querySelector('.view.active-view');
+            if (!activeView) {
+                showStudentPortal();
             }
         } else {
             // Người dùng đã đăng xuất hoặc chưa đăng nhập
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active-view'));
-            showView('role-selection-view'); // Về trang chọn vai trò
+            showView('role-selection-view');
         }
+
         if (loadingView) loadingView.classList.remove('active-view');
     });
 
