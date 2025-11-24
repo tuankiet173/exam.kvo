@@ -1127,7 +1127,9 @@ document.addEventListener('DOMContentLoaded', function() {
     async function recalculateScores(examId) {
         if (!confirm("Bạn có chắc muốn tính lại toàn bộ điểm theo đáp án mới không?")) return;
 
-        // 1. Lấy danh sách câu hỏi (nên sắp xếp theo "order" cho chắc)
+        console.log("🔁 BẮT ĐẦU tính lại điểm cho examId =", examId);
+
+        // 1. Lấy danh sách câu hỏi (theo thứ tự order giống lúc học sinh làm bài)
         const { data: questions, error: qErr } = await supabase
             .from('questions')
             .select('*')
@@ -1136,8 +1138,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (qErr) {
             alert("Lỗi tải câu hỏi: " + qErr.message);
+            console.error("❌ Lỗi tải câu hỏi:", qErr);
             return;
         }
+        console.log("✅ Số câu hỏi:", questions?.length || 0);
 
         // 2. Lấy toàn bộ bài làm
         const { data: submissions, error: sErr } = await supabase
@@ -1147,56 +1151,78 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (sErr) {
             alert("Lỗi tải bài làm: " + sErr.message);
+            console.error("❌ Lỗi tải submissions:", sErr);
             return;
         }
+        console.log("✅ Số bài làm:", submissions?.length || 0);
 
         // 3. Tính lại điểm cho từng bài
         for (const s of submissions) {
-            let score = 0;
+            const answers = s.answers || {};
+            let totalScore = 0;
 
             questions.forEach((q, index) => {
-                const answers = s.answers || [];
                 const studentAns = answers[index];
-                const correct = q.correct_answer;
+                const correctAns = q.correct_answer;
 
-                if (studentAns == null || !correct) return;
+                if (!studentAns || !correctAns) return;
 
-                if (q.question_type === 'multiple_choice') {
-                    if (studentAns === correct.answer) score += q.points;
-                }
-                else if (q.question_type === 'true_false') {
-                    const isCorrect = Object.keys(correct)
-                        .every(k => studentAns[k] === correct[k]);
-                    if (isCorrect) score += q.points;
-                }
-                else if (q.question_type === 'short_answer') {
+                // multiple_choice & short_answer: so sánh chuỗi (y như lúc nộp bài)
+                if (q.question_type === 'multiple_choice' || q.question_type === 'short_answer') {
                     if (
-                        String(studentAns).trim().toLowerCase() ===
-                        String(correct.answer).trim().toLowerCase()
+                        String(studentAns || '').toLowerCase() ===
+                        String(correctAns.answer || '').toLowerCase()
                     ) {
-                        score += q.points;
+                        totalScore += q.points;
                     }
+                }
+                // true_false: chấm theo số mệnh đề đúng (4 → 1đ, 3 → 0.5, 2 → 0.25, 1 → 0.1)
+                else if (q.question_type === 'true_false') {
+                    let correctTfCount = 0;
+                    if (correctAns) {
+                        Object.keys(correctAns).forEach(key => {
+                            if (studentAns[key] && studentAns[key] === correctAns[key]) {
+                                correctTfCount++;
+                            }
+                        });
+                    }
+                    if (correctTfCount === 4) totalScore += 1.0;
+                    else if (correctTfCount === 3) totalScore += 0.5;
+                    else if (correctTfCount === 2) totalScore += 0.25;
+                    else if (correctTfCount === 1) totalScore += 0.1;
                 }
             });
 
-            // N/A → 0 điểm
-            const safeScore = (score == null || isNaN(score)) ? 0 : score;
+            totalScore = Math.round(totalScore * 100) / 100;
+            const safeScore = (totalScore == null || isNaN(totalScore)) ? 0 : totalScore;
 
-            await supabase
+            console.log(
+                `➡️ Bài làm ${s.id}: oldScore = ${s.score}, newScore = ${safeScore}`,
+                "answers =", s.answers
+            );
+
+            // 4. Lưu lại điểm – lần này KIỂM TRA LUÔN error
+            const { error: upErr } = await supabase
                 .from('submissions')
                 .update({ score: safeScore })
                 .eq('id', s.id);
+
+            if (upErr) {
+                console.error("❌ Lỗi cập nhật điểm cho submission", s.id, upErr);
+            }
         }
 
         alert("Đã cập nhật lại toàn bộ điểm theo đáp án mới!");
 
-        // Reload lại bảng kết quả để thấy điểm mới
-        if (window.currentViewingResults && window.currentViewingResults.examId === examId) {
-            await viewResults(window.currentViewingResults.examId, window.currentViewingResults.examTitle);
+        // 5. Nếu đang xem kết quả đề này thì load lại bảng
+        try {
+            if (currentViewingResults && currentViewingResults.examId === examId) {
+                await viewResults(currentViewingResults.examId, currentViewingResults.examTitle);
+            }
+        } catch (e) {
+            console.warn("Không reload được bảng kết quả sau khi chấm lại:", e);
         }
     }
-
-
 
     // Các hàm tiện ích
     function showModal(title, message, onConfirm) {
