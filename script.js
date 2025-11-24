@@ -1366,6 +1366,7 @@ document.addEventListener('DOMContentLoaded', function() {
     window.showModal = showModal; // Cần expose nếu gọi từ HTML (thường không)
     window.hideModal = hideModal; // Cần expose nếu gọi từ HTML (thường không)
     window.toggleRadio = toggleRadio; // Cần expose vì gọi từ onclick
+    window.currentViewingResults = currentViewingResults;
     // window.handleBeforeUnload = handleBeforeUnload; // Tự động gắn/gỡ event listener
     window.showReview = showReview;
     // window.renderReview = renderReview; // Hàm nội bộ
