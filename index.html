@@ -151,7 +151,16 @@
             <div class="bg-white p-6 rounded-xl shadow-lg border">
                 <div id="results-loader" class="loader mx-auto hidden"></div>
                 <table class="min-w-full hidden" id="results-table">
-                    ...
+                  <thead>
+                    <tr>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">#</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Học sinh</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Thời gian nộp</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Điểm</th>
+                      <th class="px-6 py-3"></th>
+                    </tr>
+                  </thead>
+                  <tbody id="results-table-body"></tbody>
                 </table>
                 <p id="no-results-message" class="text-slate-500 hidden text-center py-8">
                     Chưa có ai làm bài thi này.
