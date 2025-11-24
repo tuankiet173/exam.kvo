@@ -1131,10 +1131,11 @@ document.addEventListener('DOMContentLoaded', function() {
         const { data: questions, error: qErr } = await supabase
             .from('questions')
             .select('*')
-            .eq('exam_id', examId);
+            .eq('exam_id', examId)
+            .order('order', { ascending: true });
 
         if (qErr) {
-            alert("Lỗi tải câu hỏi: " + qErr.message);
+            alert("Lỗi tải câu hỏi.");
             return;
         }
 
@@ -1145,50 +1146,45 @@ document.addEventListener('DOMContentLoaded', function() {
             .eq('exam_id', examId);
 
         if (sErr) {
-            alert("Lỗi tải bài làm: " + sErr.message);
+            alert("Lỗi tải bài làm.");
             return;
         }
 
-        // 3. Tính lại điểm cho từng bài
+        // 3. Tính lại điểm từng bài
         for (const s of submissions) {
-            const answers = s.answers || {};
-            let totalScore = 0;
+            const answers = s.answers || [];
+            let score = 0;
 
             questions.forEach((q, index) => {
                 const studentAns = answers[index];
                 const correctAns = q.correct_answer;
 
-                if (!studentAns || !correctAns) return;
+                if (!correctAns || studentAns == null) return;
 
-                // multiple_choice & short_answer: so sánh chuỗi (y như lúc nộp bài)
+                // Trắc nghiệm + tự luận ngắn
                 if (q.question_type === 'multiple_choice' || q.question_type === 'short_answer') {
-                    if (
-                        String(studentAns || '').toLowerCase() ===
-                        String(correctAns.answer || '').toLowerCase()
-                    ) {
-                        totalScore += q.points;
-                    }
+                    const sa = String(studentAns || '').trim().toLowerCase();
+                    const ca = String((correctAns.answer || '')).trim().toLowerCase();
+                    if (sa === ca) score += q.points;
                 }
-                // true_false: chấm theo số mệnh đề đúng (4 → 1đ, 3 → 0.5, 2 → 0.25, 1 → 0.1)
+
+                // Đúng – sai theo số mệnh đề đúng
                 else if (q.question_type === 'true_false') {
-                    let correctTfCount = 0;
-                    if (correctAns) {
-                        Object.keys(correctAns).forEach(key => {
-                            if (studentAns[key] && studentAns[key] === correctAns[key]) {
-                                correctTfCount++;
-                            }
-                        });
+                    let count = 0;
+                    for (const k in correctAns) {
+                        if (studentAns[k] === correctAns[k]) count++;
                     }
-                    if (correctTfCount === 4) totalScore += 1.0;
-                    else if (correctTfCount === 3) totalScore += 0.5;
-                    else if (correctTfCount === 2) totalScore += 0.25;
-                    else if (correctTfCount === 1) totalScore += 0.1;
+                    if (count === 4) score += 1.0;
+                    else if (count === 3) score += 0.5;
+                    else if (count === 2) score += 0.25;
+                    else if (count === 1) score += 0.1;
                 }
             });
 
-            // N/A -> 0
-            const safeScore = (score == null || isNaN(score)) ? 0 : score;
+            // Làm tròn và bảo vệ lỗi
+            const safeScore = (score == null || Number.isNaN(score)) ? 0 : Math.round(score * 100) / 100;
 
+            // Lưu điểm
             await supabase
                 .from('submissions')
                 .update({ score: safeScore })
@@ -1197,7 +1193,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         alert("Đã cập nhật lại toàn bộ điểm theo đáp án mới!");
 
-        // 4. Reload lại bảng nếu đang xem đề này
+        // Reload bảng kết quả
         if (currentViewingResults && currentViewingResults.examId === examId) {
             await viewResults(currentViewingResults.examId, currentViewingResults.examTitle);
         }
