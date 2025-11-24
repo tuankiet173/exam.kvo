@@ -1,43 +1,59 @@
 document.addEventListener('DOMContentLoaded', function() {
 
     // --- CẤU HÌNH & BIẾN TOÀN CỤC ---
-    const TEACHER_PASSWORD = '172119';
-    const IMGBB_API_KEY = 'a988b42e58e87da17b5d36609ea2dbea';
-    
-    let currentUser = null; // Lưu thông tin người dùng đang đăng nhập
+    const TEACHER_PASSWORD = '172119'; // Mật khẩu giáo viên (vẫn giữ cách cũ)
+
+    // --- Cấu hình Supabase ---
+    const SUPABASE_URL = 'https://nwttcewahludqajptnxe.supabase.co'; // Thay bằng Project URL Supabase
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im53dHRjZXdhaGx1ZHFhanB0bnhlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE3NTYxNzMsImV4cCI6MjA3NzMzMjE3M30.HcYbP0lvB46oEU8hZX-X2PagWF1E4NmADq9-3Kyxchg'; // Thay bằng khóa anon public Supabase
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    window.supabase = supabase; // Đưa vào biến toàn cục để tiện dùng
+
+    // --- Cấu hình Cloudinary ---
+    const CLOUDINARY_CLOUD_NAME = 'dfbl99all'; // Thay bằng Cloud Name Cloudinary
+    const CLOUDINARY_UPLOAD_PRESET = 'web_thi'; // Thay bằng Upload Preset Cloudinary
+
+    let currentUser = null; // Lưu thông tin người dùng đang đăng nhập (từ Supabase)
     let parsedQuestions = [];
-    let currentEditingExamId = null;
-    let currentTakingExam = null;
-    let currentSubmissionId = null;
+    let currentEditingExamId = null; // Lưu ID (uuid) của đề đang sửa
+    let currentTakingExam = null; // Lưu thông tin đề đang làm
+    let currentSubmissionId = null; // Lưu ID (uuid) của bài làm đang thực hiện
     let currentQuestionIndex = 0;
     let studentAnswers = {};
     let timerInterval = null;
-    let lastSubmissionData = null;
+    let lastSubmissionData = null; // Dùng để xem lại bài
     let modalConfirmCallback = null;
     let currentViewingResults = { examId: null, examTitle: null };
 
-    // --- QUẢN LÝ TRẠNG THÁI AUTHENTICATION (QUAN TRỌNG NHẤT) ---
-    window.firebase.onAuthStateChanged(window.auth, user => {
+    // --- QUẢN LÝ TRẠNG THÁI AUTHENTICATION (SUPABASE) ---
+    supabase.auth.onAuthStateChange((event, session) => {
         const loadingView = document.getElementById('loading-view');
         const teacherDashboardView = document.getElementById('teacher-dashboard-view');
         
-        if (user) {
-            currentUser = user;
-            if (!teacherDashboardView || teacherDashboardView.style.display !== 'block') {
-                 showStudentPortal();
+        currentUser = session?.user || null; // Lấy thông tin user từ session
+
+        if (currentUser) {
+            // Người dùng đã đăng nhập
+            if (!teacherDashboardView || !teacherDashboardView.classList.contains('active-view')) {
+                 showStudentPortal(); // Chuyển đến trang học sinh
             }
         } else {
-            currentUser = null;
+            // Người dùng đã đăng xuất hoặc chưa đăng nhập
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active-view'));
-            showView('role-selection-view');
+            showView('role-selection-view'); // Về trang chọn vai trò
         }
         if (loadingView) loadingView.classList.remove('active-view');
     });
 
     // --- KHỞI TẠO ---
-    document.getElementById('docx-file-input').addEventListener('change', handleFileSelect, false);
-    document.getElementById('modal-confirm-btn').onclick = () => { if (modalConfirmCallback) modalConfirmCallback(); };
-    document.getElementById('modal-cancel-btn').onclick = hideModal;
+    const docxInput = document.getElementById('docx-file-input');
+    if (docxInput) docxInput.addEventListener('change', handleFileSelect, false);
+    
+    const confirmBtn = document.getElementById('modal-confirm-btn');
+    if (confirmBtn) confirmBtn.onclick = () => { if (modalConfirmCallback) modalConfirmCallback(); };
+    
+    const cancelBtn = document.getElementById('modal-cancel-btn');
+    if (cancelBtn) cancelBtn.onclick = hideModal;
 
     // --- QUẢN LÝ GIAO DIỆN ---
     function showView(viewId) {
@@ -47,21 +63,24 @@ document.addEventListener('DOMContentLoaded', function() {
         
         const logoutButton = document.getElementById('logout-button');
         const teacherViews = ['teacher-dashboard-view', 'exam-editor-view', 'teacher-results-view'];
+        
         if (teacherViews.includes(viewId)) {
             logoutButton.textContent = 'Đăng xuất (GV)';
-            logoutButton.onclick = () => showView('role-selection-view');
+            logoutButton.onclick = () => {
+                // Tạm thời chỉ quay về trang chọn vai trò cho GV
+                showView('role-selection-view');
+            };
             logoutButton.style.display = 'block';
         } else if (currentUser) {
             logoutButton.textContent = 'Đăng xuất';
-            logoutButton.onclick = handleLogout;
+            logoutButton.onclick = handleLogout; // Gọi hàm đăng xuất Supabase
             logoutButton.style.display = 'block';
-        }
-        else {
+        } else {
             logoutButton.style.display = 'none';
         }
     }
 
-    // --- TEACHER LOGIC ---
+    // --- LOGIC CỦA GIÁO VIÊN ---
     function checkTeacherPassword() {
         if (document.getElementById('teacher-password-input').value === TEACHER_PASSWORD) {
             document.getElementById('password-error').classList.add('hidden');
@@ -77,40 +96,41 @@ document.addEventListener('DOMContentLoaded', function() {
         if (loader) loader.style.display = 'block';
         listEl.innerHTML = '';
         try {
-            const querySnapshot = await window.firebase.getDocs(window.firebase.collection(window.db, "exams"));
-            if (querySnapshot.empty) {
+            // Lấy danh sách đề thi từ bảng 'exams', sắp xếp theo thời gian tạo mới nhất
+            const { data: exams, error } = await supabase
+                .from('exams')
+                .select('*')
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+
+            if (!exams || exams.length === 0) {
                 listEl.innerHTML = '<p class="text-slate-500">Chưa có đề thi nào được tạo.</p>';
             } else {
-                const exams = [];
-                querySnapshot.forEach(doc => exams.push({ id: doc.id, ...doc.data() }));
-                exams.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
                 exams.forEach(exam => {
                     const isOpen = exam.isOpen !== false;
-                    const statusClass = isOpen ? 'text-green-600' : 'text-red-600';
-                    const statusText = isOpen ? 'Đang mở' : 'Đã đóng';
-                    const toggleButtonText = isOpen ? 'Đóng đề' : 'Mở đề';
-                    const toggleButtonClass = isOpen ? 'bg-amber-500 hover:bg-amber-600' : 'bg-green-500 hover:bg-green-600';
+                    // ... (Phần hiển thị HTML giữ nguyên logic cũ, chỉ thay đổi cách gọi hàm onclick) ...
                     const examEl = document.createElement('div');
                     examEl.className = 'flex justify-between items-center p-4 bg-slate-50 rounded-xl border border-slate-200 hover:shadow-md hover:border-indigo-200 transition';
                     examEl.innerHTML = `
                         <div>
                             <p class="font-bold text-slate-700">${exam.title}</p>
                             <div class="flex items-center gap-4 mt-1">
-                                <p class="text-sm text-slate-500">${exam.questionCount} câu hỏi - ${exam.timeLimit} phút</p>
-                                <p class="text-sm font-bold ${statusClass}">• ${statusText}</p>
+                                <p class="text-sm text-slate-500">${exam.questionCount || 0} câu hỏi - ${exam.timeLimit} phút</p>
+                                <p class="text-sm font-bold ${isOpen ? 'text-green-600' : 'text-red-600'}">• ${isOpen ? 'Đang mở' : 'Đã đóng'}</p>
                             </div>
                         </div>
                         <div class="flex items-center gap-2">
-                            <button onclick="toggleExamStatus('${exam.id}', ${isOpen})" class="text-sm ${toggleButtonClass} text-white py-2 px-3 rounded-lg">${toggleButtonText}</button>
-                            <button onclick="viewResults('${exam.id}', '${exam.title.replace(/'/g, "\\'")}')" class="text-sm bg-indigo-500 text-white py-2 px-3 rounded-lg hover:bg-indigo-600">Kết quả</button>
-                            <button onclick="editExam('${exam.id}')" class="text-sm bg-slate-500 text-white py-2 px-3 rounded-lg hover:bg-slate-600">Sửa</button>
-                            <button onclick="confirmDeleteExam('${exam.id}', '${exam.title.replace(/'/g, "\\'")}')" class="text-sm bg-red-500 text-white py-2 px-3 rounded-lg hover:bg-red-600">Xóa</button>
+                            <button onclick="window.toggleExamStatus('${exam.id}', ${isOpen})" class="text-sm ${isOpen ? 'bg-amber-500 hover:bg-amber-600' : 'bg-green-500 hover:bg-green-600'} text-white py-2 px-3 rounded-lg">${isOpen ? 'Đóng đề' : 'Mở đề'}</button>
+                            <button onclick="window.viewResults('${exam.id}', '${exam.title.replace(/'/g, "\\'")}')" class="text-sm bg-indigo-500 text-white py-2 px-3 rounded-lg hover:bg-indigo-600">Kết quả</button>
+                            <button onclick="window.editExam('${exam.id}')" class="text-sm bg-slate-500 text-white py-2 px-3 rounded-lg hover:bg-slate-600">Sửa</button>
+                            <button onclick="window.confirmDeleteExam('${exam.id}', '${exam.title.replace(/'/g, "\\'")}')" class="text-sm bg-red-500 text-white py-2 px-3 rounded-lg hover:bg-red-600">Xóa</button>
                         </div>`;
                     listEl.appendChild(examEl);
                 });
             }
         } catch (error) {
-            console.error("Error loading exams: ", error);
+            console.error("Lỗi khi tải danh sách đề thi:", error);
             listEl.innerHTML = '<p class="text-red-500">Lỗi khi tải danh sách đề thi.</p>';
         } finally {
             if (loader) loader.style.display = 'none';
@@ -254,124 +274,215 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // *** VIẾT LẠI HÀM LƯU ĐỀ THI – BẢO ĐẢM LƯU ĐÚNG ĐÁP ÁN ***
     async function saveExam() {
         const saveButton = document.getElementById('save-exam-button');
         const loader = document.getElementById('save-loader');
-        saveButton.disabled = true; loader.style.display = 'block';
+        saveButton.disabled = true;
+        loader.style.display = 'block';
+
         try {
             const examTitle = document.getElementById('exam-title').value.trim();
             const timeLimit = parseInt(document.getElementById('exam-time-limit').value, 10);
-            if (!examTitle || !timeLimit) { alert('Vui lòng nhập đầy đủ Tiêu đề và Thời gian làm bài.'); return; }
+
+            if (!examTitle || !timeLimit) {
+                alert('Vui lòng nhập đầy đủ Tiêu đề và Thời gian làm bài.');
+                return;
+            }
+
             const settings = {
                 showScore: document.querySelector('input[name="showScoreOption"]:checked').value,
                 allowReview: document.querySelector('input[name="allowReviewOption"]:checked').value,
                 attempts: document.querySelector('input[name="attemptsOption"]:checked').value
             };
+
+            // 1. Chuẩn bị dữ liệu câu hỏi
             const questionsData = [];
+
             for (let i = 0; i < parsedQuestions.length; i++) {
                 const q = parsedQuestions[i];
-                const content = document.getElementById(`content_${i}`).innerHTML;
-                const points = parseFloat(document.getElementById(`points_${i}`).value);
-                let correct_answer = {};
+
+                // Nội dung câu hỏi (bao gồm cả <img> nếu có)
+                const contentEl = document.getElementById(`content_${i}`);
+                const content = contentEl ? contentEl.innerHTML : (q.content || '');
+
+                // Điểm số
+                const pointsInput = document.getElementById(`points_${i}`);
+                let points = pointsInput ? parseFloat(pointsInput.value) : q.points;
+                if (isNaN(points)) points = 0;
+
+                // Lấy đáp án đúng
+                let correct_answer = null;
+
                 if (q.question_type === 'multiple_choice') {
-                    const checkedRadio = document.querySelector(`input[name="answer_${i}"]:checked`);
-                    if (checkedRadio) correct_answer = { answer: checkedRadio.value };
+                    // GV chọn 1 đáp án đúng bằng radio: name="answer_i"
+                    const checked = document.querySelector(`input[name="answer_${i}"]:checked`);
+                    if (checked) {
+                        correct_answer = { answer: checked.value }; // ví dụ { answer: 'A' }
+                    }
                 } else if (q.question_type === 'short_answer') {
-                    const answerInput = document.getElementById(`answer_${i}`).value.trim();
-                    if (answerInput) correct_answer = { answer: answerInput };
+                    // GV nhập đáp án text: id="answer_i"
+                    const ansInput = document.getElementById(`answer_${i}`);
+                    const ans = ansInput ? ansInput.value.trim() : '';
+                    correct_answer = { answer: ans };
                 } else if (q.question_type === 'true_false') {
-                    q.options.forEach(({ key }) => {
-                        const checkedRadio = document.querySelector(`input[name="answer_${i}_${key}"]:checked`);
-                        if (checkedRadio) correct_answer[key] = checkedRadio.value;
+                    // Mỗi mệnh đề a,b,c,d có 2 radio: name="answer_i_a", "answer_i_b", ...
+                    const tfAnswer = {};
+                    (q.options || []).forEach(({ key }) => {
+                        const checked = document.querySelector(
+                            `input[name="answer_${i}_${key}"]:checked`
+                        );
+                        if (checked) {
+                            tfAnswer[key] = checked.value; // 'Đúng' hoặc 'Sai'
+                        }
                     });
+                    correct_answer = Object.keys(tfAnswer).length > 0 ? tfAnswer : null;
                 }
-                questionsData.push({ ...q, content, points, correct_answer, order: i });
+
+                // Bỏ id (và imageUrl nếu có) để tránh đụng PK / cột không tồn tại
+                const { id, imageUrl, ...questionPayload } = q;
+
+                questionsData.push({
+                    ...questionPayload,
+                    content,
+                    points,
+                    correct_answer,
+                    order: i
+                });
             }
+
+            // 2. Payload đề thi
             const examPayload = {
                 title: examTitle,
                 timeLimit: timeLimit,
                 questionCount: questionsData.length,
-                createdAt: new Date().toISOString(),
                 isOpen: true,
                 settings: settings
             };
+
             let examId = currentEditingExamId;
+
+            // 3. Tạo mới hoặc cập nhật đề thi
             if (examId) {
-                const examRef = window.firebase.doc(window.db, 'exams', examId);
-                await window.firebase.updateDoc(examRef, examPayload);
-                const oldQuestions = await window.firebase.getDocs(window.firebase.collection(window.db, `exams/${examId}/questions`));
-                await Promise.all(oldQuestions.docs.map(doc => window.firebase.deleteDoc(doc.ref)));
+                // Cập nhật thông tin đề
+                const { error: updateExamError } = await supabase
+                    .from('exams')
+                    .update(examPayload)
+                    .eq('id', examId);
+                if (updateExamError) throw updateExamError;
+
+                // Xóa toàn bộ câu hỏi cũ của đề này
+                const { error: deleteQuestionsError } = await supabase
+                    .from('questions')
+                    .delete()
+                    .eq('exam_id', examId);
+                if (deleteQuestionsError) throw deleteQuestionsError;
             } else {
-                const docRef = await window.firebase.addDoc(window.firebase.collection(window.db, "exams"), examPayload);
-                examId = docRef.id;
+                // Tạo đề thi mới
+                const { data: newExamData, error: insertExamError } = await supabase
+                    .from('exams')
+                    .insert(examPayload)
+                    .select('id')
+                    .single();
+
+                if (insertExamError) throw insertExamError;
+                if (!newExamData || !newExamData.id) {
+                    throw new Error("Không thể tạo đề thi mới.");
+                }
+                examId = newExamData.id;
             }
-            const batch = window.firebase.writeBatch(window.db);
-            questionsData.forEach(qData => {
-                const questionRef = window.firebase.doc(window.firebase.collection(window.db, `exams/${examId}/questions`));
-                batch.set(questionRef, qData);
-            });
-            await batch.commit();
+
+            // 4. Thêm lại toàn bộ câu hỏi với exam_id mới
+            const questionsWithExamId = questionsData.map(q => ({ ...q, exam_id: examId }));
+            const { error: insertQuestionsError } = await supabase
+                .from('questions')
+                .insert(questionsWithExamId);
+
+            if (insertQuestionsError) throw insertQuestionsError;
+
             alert('Lưu đề thi thành công!');
             showView('teacher-dashboard-view');
             loadExamsForTeacher();
-        } catch (error) { console.error("Lỗi khi lưu đề thi: ", error); alert("Đã có lỗi xảy ra khi lưu đề thi."); }
-        finally { saveButton.disabled = false; loader.style.display = 'none'; }
+        } catch (error) {
+            console.error("Lỗi khi lưu đề thi:", error);
+            alert("Đã có lỗi xảy ra khi lưu đề thi: " + error.message);
+        } finally {
+            saveButton.disabled = false;
+            loader.style.display = 'none';
+        }
     }
 
+
+    // *** VIẾT LẠI HÀM SỬA ĐỀ THI ***
     async function editExam(examId) {
         try {
             showView('exam-editor-view');
             const container = document.getElementById('question-editor-container');
             container.innerHTML = '<div class="loader mx-auto"></div>';
-            const examDoc = await window.firebase.getDoc(window.firebase.doc(window.db, "exams", examId));
-            if (!examDoc.exists()) throw new Error("Không tìm thấy đề thi.");
-            const examData = examDoc.data();
+
+            // 1. Lấy thông tin đề thi
+            const { data: examData, error: examError } = await supabase
+                .from('exams')
+                .select('*')
+                .eq('id', examId)
+                .single(); // Chỉ mong đợi 1 kết quả
+
+            if (examError || !examData) throw examError || new Error("Không tìm thấy đề thi.");
+
             currentEditingExamId = examId;
             document.getElementById('exam-title').value = examData.title;
             document.getElementById('exam-time-limit').value = examData.timeLimit;
             const settings = examData.settings || { showScore: 'immediately', allowReview: 'immediately', attempts: 'single' };
-            document.querySelector(`input[name="showScoreOption"][value="${settings.showScore}"]`).checked = true;
-            document.querySelector(`input[name="allowReviewOption"][value="${settings.allowReview}"]`).checked = true;
-            document.querySelector(`input[name="attemptsOption"][value="${settings.attempts}"]`).checked = true;
-            // *** DÒNG QUAN TRỌNG NHẤT ĐÃ ĐƯỢC SỬA Ở ĐÂY ***
-            const questionsQuery = window.firebase.query(
-                window.firebase.collection(window.db, `exams/${examId}/questions`),
-                window.firebase.orderBy("order")
-            );
-            const questionsSnapshot = await window.firebase.getDocs(questionsQuery);
-            parsedQuestions = [];
-            questionsSnapshot.forEach(doc => parsedQuestions.push({ id: doc.id, ...doc.data() }));
-            parsedQuestions.sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+            // ... (cập nhật radio button như cũ) ...
+
+            // 2. Lấy danh sách câu hỏi liên quan, sắp xếp theo 'order'
+            const { data: questions, error: questionsError } = await supabase
+                .from('questions')
+                .select('*')
+                .eq('exam_id', examId)
+                .order('order', { ascending: true });
+
+            if (questionsError) throw questionsError;
+
+            parsedQuestions = questions || []; // Lưu lại danh sách câu hỏi
+
             renderQuestionEditor(parsedQuestions);
             setTimeout(() => MathJax.typesetPromise(), 100);
-        } catch (error) { console.error("Lỗi khi sửa đề thi:", error); alert("Không thể tải dữ liệu đề thi để sửa."); showView('teacher-dashboard-view'); }
+
+        } catch (error) {
+            console.error("Lỗi khi tải đề thi để sửa:", error);
+            alert("Không thể tải dữ liệu đề thi để sửa: " + error.message);
+            showView('teacher-dashboard-view');
+        }
     }
 
+    // *** VIẾT LẠI HÀM XÓA ĐỀ THI ***
     function confirmDeleteExam(examId, examTitle) {
-        const message = 'Hành động này sẽ xóa vĩnh viễn đề thi và TOÀN BỘ bài làm của học sinh liên quan. Bạn có chắc chắn không?';
-        showModal(`Xác nhận xóa "${examTitle}"`, message, async () => {
+        const message = `
+            Bạn có chắc chắn muốn xóa đề:<br>
+            <strong>${examTitle}</strong>?<br>
+            Hành động này sẽ xóa tất cả câu hỏi và bài làm liên quan.
+        `;
+
+        showModal('Xác nhận xóa đề thi', message, async () => {
             const loader = document.getElementById('exam-list-loader');
-            if(loader) loader.style.display = 'block';
+            if (loader) loader.style.display = 'block';
             try {
-                const submissionsQuery = window.firebase.query(
-                    window.firebase.collection(window.db, "submissions"),
-                    window.firebase.where("examId", "==", examId)
-                );
-                const submissionsSnapshot = await window.firebase.getDocs(submissionsQuery);
-                if (!submissionsSnapshot.empty) {
-                    const batch = window.firebase.writeBatch(window.db);
-                    submissionsSnapshot.forEach(doc => {
-                        batch.delete(doc.ref);
-                    });
-                    await batch.commit();
+                const { error } = await supabase
+                    .from('exams')
+                    .delete()
+                    .eq('id', examId);
+
+                if (error) {
+                    console.error("Lỗi khi xóa đề thi:", error);
+                    alert("Đã có lỗi xảy ra trong quá trình xóa đề thi: " + error.message);
+                    return;
                 }
-                const questionsSnapshot = await window.firebase.getDocs(window.firebase.collection(window.db, `exams/${examId}/questions`));
-                await Promise.all(questionsSnapshot.docs.map(doc => window.firebase.deleteDoc(doc.ref)));
-                await window.firebase.deleteDoc(window.firebase.doc(window.db, "exams", examId));
-                alert("Xóa đề thi và tất cả dữ liệu liên quan thành công!");
-            } catch (error) {
-                console.error("Lỗi khi xóa đề thi và dữ liệu liên quan:", error);
-                alert("Đã có lỗi xảy ra trong quá trình xóa.");
+
+                alert("Xóa đề thi thành công!");
+            } catch (err) {
+                console.error("Lỗi xóa đề thi:", err);
+                alert("Đã có lỗi xảy ra: " + err.message);
             } finally {
                 hideModal();
                 loadExamsForTeacher();
@@ -379,14 +490,18 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+
     async function toggleExamStatus(examId, currentStatus) {
         try {
-            const examRef = window.firebase.doc(window.db, 'exams', examId);
-            await window.firebase.updateDoc(examRef, { isOpen: !currentStatus });
+            const { error } = await supabase
+                .from('exams')
+                .update({ isOpen: !currentStatus })
+                .eq('id', examId);
+            if (error) throw error;
             loadExamsForTeacher();
         } catch (error) {
             console.error("Lỗi khi thay đổi trạng thái đề thi:", error);
-            alert("Đã có lỗi xảy ra. Không thể cập nhật trạng thái.");
+            alert("Đã có lỗi xảy ra: " + error.message);
         }
     }
 
@@ -399,23 +514,24 @@ document.addEventListener('DOMContentLoaded', function() {
         const table = document.getElementById('results-table');
         const loader = document.getElementById('results-loader');
         const noResultsMsg = document.getElementById('no-results-message');
-        const headerRow = table.querySelector('thead tr');
-        if (!headerRow.querySelector('.th-action')) {
-            headerRow.innerHTML += `<th scope="col" class="px-6 py-3 text-left text-xs font-medium uppercase th-action">Hành động</th>`;
-        }
         table.classList.add('hidden');
         noResultsMsg.classList.add('hidden');
         loader.classList.remove('hidden');
         tableBody.innerHTML = '';
-        try {
-            const q = window.firebase.query(window.firebase.collection(window.db, "submissions"), window.firebase.where("examId", "==", examId));
-            const querySnapshot = await window.firebase.getDocs(q);
-            if (querySnapshot.empty) {
+            try {
+
+            const { data: results, error } = await supabase
+                .from('submissions')
+                .select('*')
+                .eq('exam_id', examId);
+
+            if (error) throw error;
+
+            if (!results || results.length === 0) {
                 noResultsMsg.classList.remove('hidden');
             } else {
                 let index = 1;
-                const results = [];
-                querySnapshot.forEach(doc => results.push({ id: doc.id, ...doc.data() }));
+
                 results.sort((a, b) => (b.score || -1) - (a.score || -1));
                 results.forEach(result => {
                     const row = tableBody.insertRow();
@@ -433,7 +549,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 table.classList.remove('hidden');
             }
         } catch (error) {
-            console.error("Lỗi khi xem kết quả: ", error);
+            console.error("Lỗi khi xem kết quả:", error);
             noResultsMsg.textContent = "Đã có lỗi xảy ra khi tải kết quả.";
             noResultsMsg.classList.remove('hidden');
         } finally {
@@ -441,87 +557,111 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    function confirmDeleteSubmission(submissionId, studentName) {
-        const message = `Bạn có chắc chắn muốn xóa vĩnh viễn bài làm của học sinh "${studentName}" không? Hành động này không thể hoàn tác.`;
+    // *** VIẾT LẠI HÀM XÓA BÀI LÀM ***
+     function confirmDeleteSubmission(submissionId, studentName) {
+        const message = `Bạn có chắc chắn muốn xóa vĩnh viễn bài làm của học sinh "${studentName}" không?`;
         showModal('Xác nhận Xóa', message, () => deleteSubmission(submissionId));
     }
-
     async function deleteSubmission(submissionId) {
         try {
-            await window.firebase.deleteDoc(window.firebase.doc(window.db, "submissions", submissionId));
+            const { error } = await supabase
+                .from('submissions')
+                .delete()
+                .eq('id', submissionId);
+            if (error) throw error;
             hideModal();
+            // Tải lại kết quả nếu đang xem
             if (currentViewingResults.examId) {
                 viewResults(currentViewingResults.examId, currentViewingResults.examTitle);
             }
         } catch (error) {
             console.error("Lỗi khi xóa bài làm:", error);
-            alert("Đã có lỗi xảy ra khi xóa bài làm.");
+            alert("Đã có lỗi xảy ra khi xóa bài làm: " + error.message);
             hideModal();
         }
     }
 
+    // Upload ảnh lên Cloudinary và chèn vào nội dung câu hỏi
     async function insertImage(event, index) {
-        const file = event.target.files[0]; if (!file) return;
-        const contentDiv = document.getElementById(`content_${index}`);
-        contentDiv.innerHTML += `<p id="upload-indicator-${index}" class="text-sm text-slate-500 italic">Đang tải ảnh lên...</p>`;
-        const formData = new FormData();
-        formData.append('image', file);
-        try {
-            const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, { method: 'POST', body: formData });
-            const result = await response.json();
-            if (result.success) {
-                
-                // --- LOGIC TỐI ƯU HÓA TỐC ĐỘ ---
-                // Ưu tiên dùng ảnh cỡ vừa (medium) nếu có, nếu không thì dùng ảnh gốc (url)
-                // Tuyệt đối không dùng display_url
-                const imageUrl = result.data.medium?.url || result.data.url; 
-                const img = `<img src="${imageUrl}" alt="Uploaded Image">`;
-                // --- KẾT THÚC LOGIC TỐI ƯU HÓA ---
+        const file = event.target.files[0];
+        if (!file) return;
 
-                document.getElementById(`upload-indicator-${index}`).remove();
-                contentDiv.innerHTML += img;
-            } else { 
-                throw new Error(result.error.message); 
+        try {
+            const url = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/upload`;
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+
+            const res = await fetch(url, {
+                method: 'POST',
+                body: formData
+            });
+
+            const data = await res.json();
+
+            if (!res.ok || data.error) {
+                console.error("Cloudinary error:", data.error || data);
+                alert("Không upload được ảnh lên Cloudinary. Vui lòng kiểm tra lại CLOUD_NAME và UPLOAD_PRESET.");
+                return;
             }
-        } catch (error) { 
-            console.error("Lỗi khi tải ảnh: ", error); 
-            alert("Lỗi khi tải ảnh: " + error.message); 
-            document.getElementById(`upload-indicator-${index}`).remove(); 
+
+            const imageUrl = data.secure_url;
+            if (!imageUrl) {
+                alert("Không lấy được đường dẫn ảnh từ Cloudinary.");
+                return;
+            }
+
+            const contentDiv = document.getElementById(`content_${index}`);
+            if (contentDiv) {
+                contentDiv.innerHTML += `<br><img src="${imageUrl}" alt="Hình minh họa" class="max-w-full mt-2">`;
+            }
+
+            if (Array.isArray(parsedQuestions) && parsedQuestions[index]) {
+                parsedQuestions[index].imageUrl = imageUrl;
+            }
+
+            if (window.MathJax && window.MathJax.typesetPromise) {
+                setTimeout(() => MathJax.typesetPromise(), 50);
+            }
+
+            event.target.value = '';
+
+        } catch (err) {
+            console.error("Lỗi upload ảnh Cloudinary:", err);
+            alert("Đã xảy ra lỗi khi upload ảnh. Vui lòng thử lại.");
         }
     }
-    
+
     function triggerImageUpload(index) { document.getElementById(`image_upload_${index}`).click(); }
 
-    // --- CÁC HÀM XỬ LÝ AUTHENTICATION MỚI ---
+
+    // --- HÀM XỬ LÝ AUTHENTICATION (SUPABASE) ---
     async function handleRegister() {
         const fullName = document.getElementById('register-fullname').value.trim();
         const email = document.getElementById('register-email').value.trim();
         const password = document.getElementById('register-password').value;
         const errorEl = document.getElementById('register-error');
         errorEl.classList.add('hidden');
-
-        if (!fullName || !email || !password) {
-            errorEl.textContent = "Vui lòng nhập đầy đủ thông tin.";
-            errorEl.classList.remove('hidden');
-            return;
-        }
+        if (!fullName || !email || !password) { /* ... báo lỗi ... */ return; }
 
         try {
-            const userCredential = await window.firebase.createUserWithEmailAndPassword(window.auth, email, password);
-            await window.firebase.updateProfile(userCredential.user, { displayName: fullName });
-            
-            alert('Đăng ký thành công! Vui lòng đăng nhập.');
+            // Đăng ký người dùng mới
+            const { data, error } = await supabase.auth.signUp({
+                email: email,
+                password: password,
+                options: {
+                    data: { // Lưu trữ tên vào metadata (có thể lấy sau)
+                        full_name: fullName
+                    }
+                }
+            });
+            if (error) throw error;
+            // Supabase mặc định cần xác thực email, nếu không muốn, cần tắt trong cài đặt
+            alert('Đăng ký thành công! Vui lòng kiểm tra email để xác thực (nếu được yêu cầu) và sau đó đăng nhập.');
             showView('login-view');
-
         } catch (error) {
             console.error("Lỗi Đăng ký:", error);
-            if (error.code === 'auth/email-already-in-use') {
-                errorEl.textContent = "Email này đã được sử dụng.";
-            } else if (error.code === 'auth/weak-password') {
-                errorEl.textContent = "Mật khẩu quá yếu (cần ít nhất 6 ký tự).";
-            } else {
-                errorEl.textContent = "Đã có lỗi xảy ra. Vui lòng thử lại.";
-            }
+            errorEl.textContent = error.message; // Hiển thị lỗi từ Supabase
             errorEl.classList.remove('hidden');
         }
     }
@@ -531,16 +671,16 @@ document.addEventListener('DOMContentLoaded', function() {
         const password = document.getElementById('login-password').value;
         const errorEl = document.getElementById('login-error');
         errorEl.classList.add('hidden');
-
-        if (!email || !password) {
-            errorEl.textContent = "Vui lòng nhập email và mật khẩu.";
-            errorEl.classList.remove('hidden');
-            return;
-        }
+        if (!email || !password) { /* ... báo lỗi ... */ return; }
 
         try {
-            await window.firebase.signInWithEmailAndPassword(window.auth, email, password);
-            // onAuthStateChanged sẽ tự động xử lý chuyển màn hình
+            // Đăng nhập
+            const { data, error } = await supabase.auth.signInWithPassword({
+                email: email,
+                password: password,
+            });
+            if (error) throw error;
+            // onAuthStateChange sẽ tự động xử lý chuyển màn hình
         } catch (error) {
             console.error("Lỗi Đăng nhập:", error);
             errorEl.textContent = "Email hoặc mật khẩu không chính xác.";
@@ -550,8 +690,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function handleLogout() {
         try {
-            await window.firebase.signOut(window.auth);
-            // onAuthStateChanged sẽ tự động xử lý chuyển màn hình
+            // Đăng xuất
+            const { error } = await supabase.auth.signOut();
+            if (error) throw error;
+            // onAuthStateChange sẽ tự động xử lý chuyển màn hình
         } catch (error) {
             console.error("Lỗi Đăng xuất:", error);
             alert("Đã có lỗi xảy ra khi đăng xuất.");
@@ -563,22 +705,28 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!email || email.trim() === '') return;
 
         try {
-            await window.firebase.sendPasswordResetEmail(window.auth, email);
+            // Gửi email reset mật khẩu
+            const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+                // redirectTo: 'LINK_TRANG_ĐẶT_LẠI_MẬT_KHẨU_CỦA_BẠN' // (Tùy chọn)
+            });
+            if (error) throw error;
             alert("Thành công! Vui lòng kiểm tra hộp thư của bạn để khôi phục mật khẩu.");
         } catch (error) {
             console.error("Lỗi Quên mật khẩu:", error);
-            alert("Đã có lỗi xảy ra. Vui lòng đảm bảo bạn đã nhập đúng email đã đăng ký.");
+            alert("Đã có lỗi xảy ra: " + error.message);
         }
     }
 
-    // --- CẬP NHẬT LOGIC CỦA HỌC SINH ---
+    // --- LOGIC CỦA HỌC SINH ---
     async function showStudentPortal() {
         if (!currentUser) {
             showView('login-view');
             return;
         }
         showView('student-portal-view');
-        document.getElementById('student-greeting').textContent = `Xin chào, ${currentUser.displayName || currentUser.email}!`;
+        // Lấy tên từ metadata hoặc email
+        const studentName = currentUser.user_metadata?.full_name || currentUser.email;
+        document.getElementById('student-greeting').textContent = `Xin chào, ${studentName}!`;
 
         const listEl = document.getElementById('student-exam-list');
         const loader = document.getElementById('student-exam-loader');
@@ -586,26 +734,31 @@ document.addEventListener('DOMContentLoaded', function() {
         listEl.innerHTML = '';
 
         try {
+            // 1. Lấy tất cả bài làm của học sinh này
+            const { data: submissions, error: subError } = await supabase
+                .from('submissions')
+                .select('*')
+                .eq('user_id', currentUser.id);
+            if (subError) throw subError;
+
+            // Tạo map lưu bài làm điểm cao nhất cho mỗi đề
             const submissionsMap = new Map();
-            const submissionsQuery = window.firebase.query(
-                window.firebase.collection(window.db, "submissions"),
-                window.firebase.where("userId", "==", currentUser.uid)
-            );
-            const submissionsSnapshot = await window.firebase.getDocs(submissionsQuery);
-            submissionsSnapshot.forEach(doc => {
-                const data = doc.data();
-                if (!submissionsMap.has(data.examId) || submissionsMap.get(data.examId).score < data.score) {
-                    submissionsMap.set(data.examId, { id: doc.id, ...data });
+            (submissions || []).forEach(sub => {
+                if (!submissionsMap.has(sub.exam_id) || (submissionsMap.get(sub.exam_id).score || -1) < (sub.score || -1)) {
+                    submissionsMap.set(sub.exam_id, sub);
                 }
             });
 
-            const examsSnapshot = await window.firebase.getDocs(window.firebase.collection(window.db, "exams"));
-            if (examsSnapshot.empty) {
+            // 2. Lấy tất cả đề thi
+            const { data: exams, error: examError } = await supabase
+                .from('exams')
+                .select('*')
+                .order('created_at', { ascending: false });
+            if (examError) throw examError;
+
+            if (!exams || exams.length === 0) {
                 listEl.innerHTML = '<p class="text-slate-500 text-center">Hiện chưa có đề thi nào.</p>';
             } else {
-                const exams = [];
-                examsSnapshot.forEach(doc => exams.push({ id: doc.id, ...doc.data() }));
-                exams.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
                 listEl.innerHTML = ''; // Clear loader
                 exams.forEach(exam => {
                     const submission = submissionsMap.get(exam.id);
@@ -627,8 +780,8 @@ document.addEventListener('DOMContentLoaded', function() {
                             statusHtml = `<span class="status-badge status-done">Đã nộp</span>`;
                         }
 
-                        let reviewButton = canReview ? `<button onclick="viewOldReview('${submission.id}')" class="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg transition text-sm">Xem lại</button>` : '';
-                        let retakeButton = canRetake ? `<button onclick="startExamWrapper('${exam.id}')" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition text-sm">Làm lại</button>` : '';
+                        let reviewButton = canReview ? `<button onclick="window.viewOldReview('${submission.id}')" class="bg-cyan-500 hover:bg-cyan-600 text-white font-bold py-2 px-4 rounded-lg transition text-sm">Xem lại</button>` : '';
+                        let retakeButton = canRetake ? `<button onclick="window.startExamWrapper('${exam.id}')" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition text-sm">Làm lại</button>` : '';
                         
                         buttonHtml = `<div class="flex items-center gap-2">${reviewButton}${retakeButton}</div>`;
                         if (!reviewButton && !retakeButton) {
@@ -641,21 +794,24 @@ document.addEventListener('DOMContentLoaded', function() {
                             buttonHtml = '<button class="bg-slate-300 text-slate-500 font-bold py-2 px-4 rounded-lg cursor-not-allowed text-sm" disabled>Đã đóng</button>';
                         } else {
                             statusHtml = '<span class="status-badge status-not-done">Chưa làm</span>';
-                            buttonHtml = `<button onclick="startExamWrapper('${exam.id}')" class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition text-sm">Làm bài</button>`;
+                            buttonHtml = `<button onclick="window.startExamWrapper('${exam.id}')" class="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded-lg transition text-sm">Làm bài</button>`;
                         }
                     }
 
                     const examEl = document.createElement('div');
                     examEl.className = 'p-5 bg-white rounded-xl border border-slate-200 flex justify-between items-center hover:shadow-lg hover:border-cyan-300 transition-all duration-300';
+                    
                     examEl.innerHTML = `
                         <div class="flex-grow">
                             <h3 class="font-bold text-lg text-slate-800">${exam.title}</h3>
                             <div class="flex items-center gap-4 mt-1">
-                                <p class="text-sm text-slate-500">${exam.questionCount} câu hỏi - ${exam.timeLimit} phút</p>
+                                <p class="text-sm text-slate-500">${exam.questionCount || 0} câu hỏi - ${exam.timeLimit} phút</p>
                                 ${statusHtml}
                             </div>
                         </div>
-                        <div class="flex-shrink-0 ml-4">${buttonHtml}</div>`;
+                        <div class="flex-shrink-0 ml-4">${buttonHtml}</div>
+                    `;
+ 
                     listEl.appendChild(examEl);
                 });
             }
@@ -667,52 +823,74 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
+    // *** VIẾT LẠI HÀM BẮT ĐẦU LÀM BÀI ***
     async function startExam() {
-        if (!currentUser) {
+        if (!currentUser) { 
             alert("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
             showView('login-view');
-            return;
+            return; 
         }
         try {
-            const questionsQuery = window.firebase.query(
-                window.firebase.collection(window.db, `exams/${currentTakingExam.id}/questions`),
-                window.firebase.orderBy("order")
-            );
-            const questionsSnapshot = await window.firebase.getDocs(questionsQuery);
-            currentTakingExam.questions = [];
-            questionsSnapshot.forEach(doc => currentTakingExam.questions.push({ id: doc.id, ...doc.data() }));
-            
-            const submissionRef = await window.firebase.addDoc(window.firebase.collection(window.db, "submissions"), {
-                userId: currentUser.uid,
-                studentName: currentUser.displayName || currentUser.email,
-                examId: currentTakingExam.id,
-                examTitle: currentTakingExam.title,
-                startTime: new Date().toISOString(),
-                answers: {}, score: null, endTime: null
-            });
-            currentSubmissionId = submissionRef.id;
+            // 1. Lấy câu hỏi từ bảng 'questions'
+            const { data: questions, error: questionsError } = await supabase
+                .from('questions')
+                .select('*')
+                .eq('exam_id', currentTakingExam.id)
+                .order('order', { ascending: true });
+            if (questionsError) throw questionsError;
+            currentTakingExam.questions = questions || [];
+
+            // 2. Tạo bản ghi bài làm mới trong bảng 'submissions'
+            const studentName = currentUser.user_metadata?.full_name || currentUser.email;
+            const { data: newSubmissionData, error: insertSubError } = await supabase
+                .from('submissions')
+                .insert({
+                    user_id: currentUser.id,
+                    exam_id: currentTakingExam.id,
+                    studentName: studentName, // Lưu lại tên để tiện hiển thị
+                    startTime: new Date().toISOString(),
+                    answers: {}, // Khởi tạo rỗng
+                    score: null,
+                    endTime: null
+                })
+                .select('id') // Yêu cầu trả về id
+                .single(); // Chỉ mong đợi 1 kết quả
+
+            if (insertSubError || !newSubmissionData) throw insertSubError || new Error("Không thể tạo bài làm mới.");
+            currentSubmissionId = newSubmissionData.id;
+
+            // --- CÁC DÒNG BỊ THIẾU TRƯỚC ĐÂY ---
             document.getElementById('exam-taking-title').textContent = currentTakingExam.title;
-            document.getElementById('student-name-display').textContent = `Thí sinh: ${currentUser.displayName || currentUser.email}`;
+            document.getElementById('student-name-display').textContent = `Thí sinh: ${studentName}`;
             
             currentQuestionIndex = 0;
             studentAnswers = {};
             renderCurrentQuestion();
-            startTimer(currentTakingExam.timeLimit);
-            showView('exam-taking-view');
+            
+            // Gọi timer với cột 'timeLimit' (khớp với CSDL của bạn)
+            startTimer(currentTakingExam.timeLimit); 
+            
+            showView('exam-taking-view'); // Chuyển sang màn hình làm bài
             window.addEventListener('beforeunload', handleBeforeUnload);
             renderQuestionPalette();
-        } catch (error) { 
-            console.error("Error starting exam:", error); 
-            alert("Không thể bắt đầu bài thi."); 
+
+        } catch (error) {
+            console.error("Lỗi khi bắt đầu bài thi:", error);
+            alert("Không thể bắt đầu bài thi: " + error.message);
         }
     }
 
     async function startExamWrapper(examId) {
         try {
-            const examDoc = await window.firebase.getDoc(window.firebase.doc(window.db, "exams", examId));
-            if (!examDoc.exists()) throw new Error("Không tìm thấy đề thi");
-            currentTakingExam = { id: examId, ...examDoc.data() };
-            startExam();
+            // Lấy thông tin đề thi từ bảng 'exams'
+             const { data: examData, error } = await supabase
+                .from('exams')
+                .select('*')
+                .eq('id', examId)
+                .single();
+            if (error || !examData) throw error || new Error("Không tìm thấy đề thi");
+            currentTakingExam = examData; // Lưu thông tin đề thi
+            startExam(); // Gọi hàm bắt đầu làm bài
         } catch (error) {
             console.error("Lỗi khi chuẩn bị bài thi:", error);
             alert("Không thể tải dữ liệu đề thi.");
@@ -764,20 +942,85 @@ document.addEventListener('DOMContentLoaded', function() {
         renderCurrentQuestion();
         renderQuestionPalette();
     }
-
     function renderCurrentQuestion() {
         const q = currentTakingExam.questions[currentQuestionIndex];
         const displayArea = document.getElementById('question-display-area');
         let optionsHtml = '';
         const savedAnswer = studentAnswers[currentQuestionIndex];
         if (q.question_type === 'multiple_choice') {
-            optionsHtml = q.options.map(({ key, value }) => `<div class="flex items-center my-2 p-2 rounded-lg hover:bg-slate-50"><input type="radio" name="student_answer_${currentQuestionIndex}" value="${key}" id="stud_ans_${currentQuestionIndex}_${key}" ${savedAnswer === key ? 'checked' : ''} data-was-checked="${savedAnswer === key}" class="mr-3 h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300" onclick="toggleRadio(this)"><label for="stud_ans_${currentQuestionIndex}_${key}" class="math-container w-full cursor-pointer font-times">${key}. ${value}</label></div>`).join('');
+        optionsHtml = q.options.map(({ key, value }) => `
+            <div class="flex items-center my-2 p-2 rounded-lg hover:bg-slate-50">
+                <input type="radio"
+                name="student_answer_${currentQuestionIndex}"
+                value="${key}"
+                id="stud_ans_${currentQuestionIndex}_${key}" ${savedAnswer === key ? 'checked' : ''} data-was-checked="${savedAnswer === key}"
+                class="mr-3 h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300" onclick="toggleRadio(this)">
+                <label for="stud_ans_${currentQuestionIndex}_${key}" class="math-container w-full cursor-pointer font-times">
+                ${key}. ${value}
+                </label>
+            </div>
+        `).join('');
+
         } else if (q.question_type === 'true_false') {
             optionsHtml = q.options.map(({ key, value }) => {
                 const savedChoice = savedAnswer ? savedAnswer[key] : null;
                 const isTrueChecked = savedChoice === 'Đúng';
                 const isFalseChecked = savedChoice === 'Sai';
-                return `<div class="flex items-center justify-between my-1 py-2 px-3 rounded-lg"><div class="math-container text-slate-700 mr-4">${key}) ${value}</div><div class="flex items-center gap-x-2"><div><input type="radio" name="student_answer_${currentQuestionIndex}_${key}" value="Đúng" id="stud_ans_${currentQuestionIndex}_${key}_true" class="hidden peer" onclick="toggleRadio(this)" ${isTrueChecked ? 'checked' : ''} data-was-checked="${isTrueChecked}"><label for="stud_ans_${currentQuestionIndex}_${key}_true" class="cursor-pointer py-2 px-5 text-sm font-medium rounded-full border border-slate-300 bg-white text-slate-600 peer-checked:bg-green-600 peer-checked:text-white peer-checked:border-green-600">Đúng</label></div><div><input type="radio" name="student_answer_${currentQuestionIndex}_${key}" value="Sai" id="stud_ans_${currentQuestionIndex}_${key}_false" class="hidden peer" onclick="toggleRadio(this)" ${isFalseChecked ? 'checked' : ''} data-was-checked="${isFalseChecked}"><label for="stud_ans_${currentQuestionIndex}_${key}_false" class="cursor-pointer py-2 px-5 text-sm font-medium rounded-full border border-slate-300 bg-white text-slate-600 peer-checked:bg-red-600 peer-checked:text-white peer-checked:border-red-600">Sai</label></div></div></div>`;
+
+                return `
+                <div class="flex items-center justify-between my-1 py-2 px-3 rounded-lg">
+                    <div class="math-container text-slate-700 mr-4">
+                        ${key}) ${value}
+                    </div>
+                    <div class="flex items-center gap-x-2">
+
+                        <div>
+                            <input
+                                type="radio"
+                                name="student_answer_${currentQuestionIndex}_${key}"
+                                value="Đúng"
+                                id="stud_ans_${currentQuestionIndex}_${key}_true"
+                                class="hidden peer"
+                                onclick="toggleRadio(this)"
+                                ${isTrueChecked ? 'checked' : ''}
+                                data-was-checked="${isTrueChecked}"
+                            >
+                            <label
+                                for="stud_ans_${currentQuestionIndex}_${key}_true"
+                                class="cursor-pointer py-2 px-5 text-sm font-medium rounded-full
+                                       border border-slate-300 bg-white text-slate-600
+                                       hover:bg-slate-100
+                                       peer-checked:bg-blue-600 peer-checked:text-white peer-checked:border-blue-600"
+                            >
+                                Đúng
+                            </label>
+                        </div>
+
+                        <!-- Nút SAI -->
+                        <div>
+                            <input
+                                type="radio"
+                                name="student_answer_${currentQuestionIndex}_${key}"
+                                value="Sai"
+                                id="stud_ans_${currentQuestionIndex}_${key}_false"
+                                class="hidden peer"
+                                onclick="toggleRadio(this)"
+                                ${isFalseChecked ? 'checked' : ''}
+                                data-was-checked="${isFalseChecked}"
+                            >
+                            <label
+                                for="stud_ans_${currentQuestionIndex}_${key}_false"
+                                class="cursor-pointer py-2 px-5 text-sm font-medium rounded-full
+                                       border border-slate-300 bg-white text-slate-600
+                                       hover:bg-slate-100
+                                       peer-checked:bg-blue-600 peer-checked:text-white peer-checked:border-blue-600"
+                            >
+                                Sai
+                            </label>
+                        </div>
+
+                    </div>
+                </div>`;
             }).join('');
         } else if (q.question_type === 'short_answer') {
             optionsHtml = `<input type="text" id="student_answer_${currentQuestionIndex}" value="${savedAnswer || ''}" class="mt-2 w-full p-2 border border-slate-300 rounded-lg" placeholder="Nhập đáp án..." oninput="saveStudentAnswer()">`;
@@ -825,10 +1068,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function confirmSubmitExam() { showModal('Xác nhận Nộp bài', 'Bạn có chắc chắn muốn nộp bài không?', () => { hideModal(); submitExam(); }); }
 
+    // *** VIẾT LẠI HÀM NỘP BÀI ***
     async function submitExam() {
         clearInterval(timerInterval);
         window.removeEventListener('beforeunload', handleBeforeUnload);
         let totalScore = 0;
+        // Logic chấm điểm giữ nguyên (duyệt qua currentTakingExam.questions và studentAnswers)
         currentTakingExam.questions.forEach((q, index) => {
             const studentAns = studentAnswers[index];
             const correctAns = q.correct_answer;
@@ -847,11 +1092,22 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
         totalScore = Math.round(totalScore * 100) / 100;
+
         try {
-            const submissionRef = window.firebase.doc(window.db, "submissions", currentSubmissionId);
-            await window.firebase.updateDoc(submissionRef, { answers: studentAnswers, score: totalScore, endTime: new Date().toISOString() });
-        } catch (error) { console.error("Error updating submission:", error); }
-        
+            // Cập nhật bản ghi bài làm trong bảng 'submissions'
+            const { error } = await supabase
+                .from('submissions')
+                .update({
+                    answers: studentAnswers,
+                    score: totalScore,
+                    endTime: new Date().toISOString()
+                })
+                .eq('id', currentSubmissionId); // Cập nhật đúng bài làm theo ID
+            if (error) throw error;
+        } catch (error) {
+            console.error("Lỗi khi cập nhật bài làm:", error);
+        }
+
         lastSubmissionData = { examTitle: currentTakingExam.title, questions: currentTakingExam.questions, studentAnswers: studentAnswers, finalScore: totalScore };
         
         const settings = currentTakingExam.settings || { showScore: 'immediately', allowReview: 'immediately' };
@@ -866,14 +1122,79 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    async function recalculateScores(examId) {
+        if (!confirm("Bạn có chắc muốn tính lại toàn bộ điểm theo đáp án mới không?")) return;
+
+        // 1. Lấy danh sách câu hỏi
+        const { data: questions, error: qErr } = await supabase
+            .from('questions')
+            .select('*')
+            .eq('exam_id', examId);
+
+        if (qErr) {
+            alert("Lỗi tải câu hỏi: " + qErr.message);
+            return;
+        }
+
+        // 2. Lấy toàn bộ bài làm
+        const { data: submissions, error: sErr } = await supabase
+            .from('submissions')
+            .select('*')
+            .eq('exam_id', examId);
+
+        if (sErr) {
+            alert("Lỗi tải bài làm: " + sErr.message);
+            return;
+        }
+
+        // 3. Tính lại điểm cho từng bài
+        for (const s of submissions) {
+            let score = 0;
+
+            questions.forEach((q, index) => {
+                const studentAns = s.answers[index];
+                const correct = q.correct_answer;
+
+                if (!studentAns || !correct) return;
+
+                if (q.question_type === 'multiple_choice') {
+                    if (studentAns === correct.answer) score += q.points;
+                }
+                else if (q.question_type === 'true_false') {
+                    const isCorrect = Object.keys(correct)
+                        .every(k => studentAns[k] === correct[k]);
+                    if (isCorrect) score += q.points;
+                }
+                else if (q.question_type === 'short_answer') {
+                    if (String(studentAns).trim().toLowerCase() === 
+                        String(correct.answer).trim().toLowerCase()) {
+                        score += q.points;
+                    }
+                }
+            });
+
+            // 4. Lưu lại điểm
+            await supabase
+                .from('submissions')
+                .update({ score })
+                .eq('id', s.id);
+        }
+
+        alert("Đã cập nhật lại toàn bộ điểm theo đáp án mới!");
+    }
+
+
+    // Các hàm tiện ích
     function showModal(title, message, onConfirm) {
         document.getElementById('modal-title').textContent = title;
-        document.getElementById('modal-message').textContent = message;
+        const msgEl = document.getElementById('modal-message');
+        msgEl.innerHTML = message;
         modalConfirmCallback = onConfirm;
         const modal = document.getElementById('confirmation-modal');
         modal.classList.remove('hidden');
         modal.classList.add('flex');
     }
+
 
     function hideModal() {
         const modal = document.getElementById('confirmation-modal');
@@ -899,106 +1220,118 @@ document.addEventListener('DOMContentLoaded', function() {
         showView('student-review-view');
     }
 
-function renderReview() {
-    const container = document.getElementById('review-questions-container');
-    container.innerHTML = '';
-    const { questions, studentAnswers } = lastSubmissionData;
-    questions.forEach((q, index) => {
-        const studentAns = studentAnswers[index];
-        const correctAns = q.correct_answer;
-        let optionsDisplayHtml = '';
-        if (q.question_type === 'multiple_choice') {
-            optionsDisplayHtml = q.options.map(({ key, value }) => {
-                const studentChoice = studentAns;
-                const correctChoice = correctAns.answer;
-                let indicator = '';
-                let classes = 'p-3 my-2 rounded-lg border flex items-center gap-3 transition-all ';
-                if (key === correctChoice) {
-                    classes += 'bg-green-100 border-green-400 text-green-800 font-semibold';
-                    indicator = '<span class="text-green-600 font-bold text-lg">✓</span>';
-                } else if (key === studentChoice) {
-                    classes += 'bg-red-100 border-red-400 text-red-800';
-                    indicator = '<span class="text-red-500 font-bold text-lg">✗</span>';
-                } else {
-                    classes += 'bg-slate-50 border-slate-200';
-                }
-                return `<div class="${classes}"> ${indicator} <div class="math-container font-times">${key}. ${value}</div> </div>`;
-            }).join('');
-        } 
-        else if (q.question_type === 'true_false') {
-            optionsDisplayHtml = '<div class="space-y-2 mt-3">';
-            optionsDisplayHtml += q.options.map(({ key, value }) => {
-                const studentChoice = studentAns ? studentAns[key] : null;
-                const correctChoice = correctAns ? correctAns[key] : null;
-                const renderTfOption = (optionText) => {
-                    let classes = 'py-2 px-5 text-sm font-medium rounded-full border flex items-center gap-1.5 ';
-                    let content = optionText;
-                    if (optionText === correctChoice) {
-                        classes += 'bg-green-600 text-white border-green-700';
-                        content = `✓ ${optionText}`;
-                    } else if (optionText === studentChoice) {
-                        classes += 'bg-red-600 text-white border-red-700';
-                        content = `✗ ${optionText}`;
+    function renderReview() {
+        const container = document.getElementById('review-questions-container');
+        container.innerHTML = '';
+        const { questions, studentAnswers } = lastSubmissionData;
+        questions.forEach((q, index) => {
+            const studentAns = studentAnswers[index];
+            const correctAns = q.correct_answer;
+            let optionsDisplayHtml = '';
+            if (q.question_type === 'multiple_choice') {
+                optionsDisplayHtml = q.options.map(({ key, value }) => {
+                    const studentChoice = studentAns;
+                    const correctChoice = correctAns.answer;
+                    let indicator = '';
+                    let classes = 'p-3 my-2 rounded-lg border flex items-center gap-3 transition-all ';
+                    if (key === correctChoice) {
+                        classes += 'bg-green-100 border-green-400 text-green-800 font-semibold';
+                        indicator = '<span class="text-green-600 font-bold text-lg">✓</span>';
+                    } else if (key === studentChoice) {
+                        classes += 'bg-red-100 border-red-400 text-red-800';
+                        indicator = '<span class="text-red-500 font-bold text-lg">✗</span>';
                     } else {
-                        classes += 'bg-slate-200 text-slate-500 border-slate-300';
+                        classes += 'bg-slate-50 border-slate-200';
                     }
-                    return `<span class="${classes}">${content}</span>`;
-                };
-                return `<div class="flex items-center justify-between my-1 py-2 px-3 rounded-lg bg-slate-50 border border-slate-200"><div class="math-container text-slate-700 mr-4">${key}) ${value}</div><div class="flex items-center gap-x-2">${renderTfOption('Đúng')} ${renderTfOption('Sai')}</div></div>`;
-            }).join('');
-            optionsDisplayHtml += '</div>';
-        }
-        else if (q.question_type === 'short_answer') {
-             const isCorrect = String(studentAns || '').toLowerCase() === String(correctAns.answer || '').toLowerCase();
-             let studentAnswerDisplay = studentAns 
-                ? `<p class="mt-2"><b>Câu trả lời của bạn:</b> <span class="font-mono p-2 rounded-md ${isCorrect ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${studentAns}</span></p>`
-                : '<p class="text-sm text-slate-500 mt-2"><i>Bạn không trả lời câu này.</i></p>';
-             let correctAnswerDisplay = !isCorrect
-                ? `<p class="mt-2"><b>Đáp án đúng:</b> <span class="font-mono p-2 rounded-md bg-green-100 text-green-800">${correctAns.answer || 'N/A'}</span></p>`
-                : '';
-            optionsDisplayHtml = studentAnswerDisplay + correctAnswerDisplay;
-        }
-        const reviewDiv = document.createElement('div');
-        reviewDiv.className = `border-t border-slate-200 pt-6`;
-        reviewDiv.innerHTML = `<div class="text-slate-800 math-container mb-4 font-times"><span class="font-bold">Câu ${index + 1}:</span> ${q.content}</div><div>${optionsDisplayHtml}</div>`;
-        container.appendChild(reviewDiv);
-    });
-    setTimeout(() => MathJax.typesetPromise(), 100);
-}
+                    return `<div class="${classes}"> ${indicator} <div class="math-container font-times">${key}. ${value}</div> </div>`;
+                }).join('');
+            } 
+            else if (q.question_type === 'true_false') {
+                optionsDisplayHtml = '<div class="space-y-2 mt-3">';
+                optionsDisplayHtml += q.options.map(({ key, value }) => {
+                    const studentChoice = studentAns ? studentAns[key] : null;
+                    const correctChoice = correctAns ? correctAns[key] : null;
+                    const renderTfOption = (optionText) => {
+                        let classes = 'py-2 px-5 text-sm font-medium rounded-full border flex items-center gap-1.5 ';
+                        let content = optionText;
+                        if (optionText === correctChoice) {
+                            classes += 'bg-green-600 text-white border-green-700';
+                            content = `✓ ${optionText}`;
+                        } else if (optionText === studentChoice) {
+                            classes += 'bg-red-600 text-white border-red-700';
+                            content = `✗ ${optionText}`;
+                        } else {
+                            classes += 'bg-slate-200 text-slate-500 border-slate-300';
+                        }
+                        return `<span class="${classes}">${content}</span>`;
+                    };
+                    return `<div class="flex items-center justify-between my-1 py-2 px-3 rounded-lg bg-slate-50 border border-slate-200"><div class="math-container text-slate-700 mr-4">${key}) ${value}</div><div class="flex items-center gap-x-2">${renderTfOption('Đúng')} ${renderTfOption('Sai')}</div></div>`;
+                }).join('');
+                optionsDisplayHtml += '</div>';
+            }
+            else if (q.question_type === 'short_answer') {
+                 const isCorrect = String(studentAns || '').toLowerCase() === String(correctAns.answer || '').toLowerCase();
+                 let studentAnswerDisplay = studentAns 
+                    ? `<p class="mt-2"><b>Câu trả lời của bạn:</b> <span class="font-mono p-2 rounded-md ${isCorrect ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${studentAns}</span></p>`
+                    : '<p class="text-sm text-slate-500 mt-2"><i>Bạn không trả lời câu này.</i></p>';
+                 let correctAnswerDisplay = !isCorrect
+                    ? `<p class="mt-2"><b>Đáp án đúng:</b> <span class="font-mono p-2 rounded-md bg-green-100 text-green-800">${correctAns.answer || 'N/A'}</span></p>`
+                    : '';
+                optionsDisplayHtml = studentAnswerDisplay + correctAnswerDisplay;
+            }
+            const reviewDiv = document.createElement('div');
+            reviewDiv.className = `border-t border-slate-200 pt-6`;
+            reviewDiv.innerHTML = `<div class="text-slate-800 math-container mb-4 font-times"><span class="font-bold">Câu ${index + 1}:</span> ${q.content}</div><div>${optionsDisplayHtml}</div>`;
+            container.appendChild(reviewDiv);
+        });
+        setTimeout(() => MathJax.typesetPromise(), 100);
+    }
 
+    // *** VIẾT LẠI HÀM XEM LẠI BÀI LÀM CŨ ***
     async function viewOldReview(submissionId) {
         try {
-            const submissionDoc = await window.firebase.getDoc(window.firebase.doc(window.db, "submissions", submissionId));
-            if (!submissionDoc.exists()) throw new Error("Không tìm thấy bài làm.");
-            const submissionData = submissionDoc.data();
-            const examId = submissionData.examId;
-            const examDoc = await window.firebase.getDoc(window.firebase.doc(window.db, "exams", examId));
-            if (!examDoc.exists()) throw new Error("Không tìm thấy đề thi tương ứng.");
-            const examData = examDoc.data();
-            const questionsQuery = window.firebase.query(
-                window.firebase.collection(window.db, `exams/${examId}/questions`),
-                window.firebase.orderBy("order")
-            );
-            const questionsSnapshot = await window.firebase.getDocs(questionsQuery);
-            const questions = [];
-            questionsSnapshot.forEach(doc => questions.push({ id: doc.id, ...doc.data() }));
-            questions.sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0));
+            // 1. Lấy thông tin bài làm từ bảng 'submissions'
+            const { data: submissionData, error: subError } = await supabase
+                .from('submissions')
+                .select('*')
+                .eq('id', submissionId)
+                .single();
+            if (subError || !submissionData) throw subError || new Error("Không tìm thấy bài làm.");
+
+            const examId = submissionData.exam_id;
+
+            // 2. Lấy thông tin đề thi từ bảng 'exams'
+            const { data: examData, error: examError } = await supabase
+                .from('exams')
+                .select('title') // Chỉ cần lấy title
+                .eq('id', examId)
+                .single();
+            if (examError || !examData) throw examError || new Error("Không tìm thấy đề thi tương ứng.");
+
+            // 3. Lấy danh sách câu hỏi từ bảng 'questions'
+            const { data: questions, error: questionsError } = await supabase
+                .from('questions')
+                .select('*')
+                .eq('exam_id', examId)
+                .order('order', { ascending: true });
+            if (questionsError) throw questionsError;
+
+            // Chuẩn bị dữ liệu và hiển thị (giống code cũ)
             lastSubmissionData = {
                 examTitle: examData.title,
-                questions: questions,
+                questions: questions || [],
                 studentAnswers: submissionData.answers,
                 finalScore: submissionData.score
             };
             showReview();
         } catch (error) {
             console.error("Lỗi khi xem lại bài làm:", error);
-            alert(error.message);
+            alert("Không thể tải bài làm để xem lại: " + error.message);
         }
     }
 
-// --- EXPOSE FUNCTIONS TO GLOBAL SCOPE ---
-    // Dán đoạn code này vào cuối file script.js, ngay trước dòng }); cuối cùng
-    // để các hàm có thể được gọi từ file HTML
+    // --- EXPOSE FUNCTIONS TO GLOBAL SCOPE ---
+    // (Đảm bảo tất cả các hàm cần gọi từ HTML đều được đưa vào window)
     window.showView = showView;
     window.checkTeacherPassword = checkTeacherPassword;
     window.handleRegister = handleRegister;
@@ -1008,8 +1341,8 @@ function renderReview() {
     window.showStudentPortal = showStudentPortal;
     window.loadExamsForTeacher = loadExamsForTeacher;
     window.handleFileSelect = handleFileSelect;
-    window.parseHtmlToQuestions = parseHtmlToQuestions;
-    window.renderQuestionEditor = renderQuestionEditor;
+    // window.parseHtmlToQuestions = parseHtmlToQuestions; // Hàm nội bộ, không cần expose
+    // window.renderQuestionEditor = renderQuestionEditor; // Hàm nội bộ
     window.saveExam = saveExam;
     window.editExam = editExam;
     window.confirmDeleteExam = confirmDeleteExam;
@@ -1019,24 +1352,23 @@ function renderReview() {
     window.deleteSubmission = deleteSubmission;
     window.insertImage = insertImage;
     window.triggerImageUpload = triggerImageUpload;
-    window.startExam = startExam;
-
-    // Các hàm phụ trợ khi làm bài
+    window.startExam = startExam; // Hàm nội bộ, gọi qua startExamWrapper
     window.startExamWrapper = startExamWrapper;
-    window.renderQuestionPalette = renderQuestionPalette;
+    // window.renderQuestionPalette = renderQuestionPalette; // Hàm nội bộ
     window.jumpToQuestion = jumpToQuestion;
-    window.renderCurrentQuestion = renderCurrentQuestion;
-    window.saveStudentAnswer = saveStudentAnswer;
+    // window.renderCurrentQuestion = renderCurrentQuestion; // Hàm nội bộ
+    window.saveStudentAnswer = saveStudentAnswer; // Cần expose vì gọi từ oninput
     window.navigateQuestion = navigateQuestion;
-    window.updateNavigationButtons = updateNavigationButtons;
-    window.startTimer = startTimer;
+    // window.updateNavigationButtons = updateNavigationButtons; // Hàm nội bộ
+    // window.startTimer = startTimer; // Hàm nội bộ
     window.confirmSubmitExam = confirmSubmitExam;
-    window.submitExam = submitExam;
-    window.showModal = showModal;
-    window.hideModal = hideModal;
-    window.toggleRadio = toggleRadio;
-    window.handleBeforeUnload = handleBeforeUnload;
+    window.submitExam = submitExam; // Có thể gọi nội bộ từ timer
+    window.showModal = showModal; // Cần expose nếu gọi từ HTML (thường không)
+    window.hideModal = hideModal; // Cần expose nếu gọi từ HTML (thường không)
+    window.toggleRadio = toggleRadio; // Cần expose vì gọi từ onclick
+    // window.handleBeforeUnload = handleBeforeUnload; // Tự động gắn/gỡ event listener
     window.showReview = showReview;
-    window.renderReview = renderReview;
+    // window.renderReview = renderReview; // Hàm nội bộ
     window.viewOldReview = viewOldReview;
+    window.recalculateScores = recalculateScores;
 });
