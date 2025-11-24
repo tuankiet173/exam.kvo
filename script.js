@@ -1151,28 +1151,38 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // 3. Tính lại điểm cho từng bài
         for (const s of submissions) {
-            let score = 0;
+            const answers = s.answers || {};
+            let totalScore = 0;
 
             questions.forEach((q, index) => {
-                const answers = s.answers || [];
                 const studentAns = answers[index];
-                const correct = q.correct_answer;
+                const correctAns = q.correct_answer;
 
-                if (!studentAns || !correct) return;
+                if (!studentAns || !correctAns) return;
 
-                if (q.question_type === 'multiple_choice') {
-                    if (studentAns === correct.answer) score += q.points;
-                } else if (q.question_type === 'true_false') {
-                    const isCorrect = Object.keys(correct)
-                        .every(k => studentAns[k] === correct[k]);
-                    if (isCorrect) score += q.points;
-                } else if (q.question_type === 'short_answer') {
+                // multiple_choice & short_answer: so sánh chuỗi (y như lúc nộp bài)
+                if (q.question_type === 'multiple_choice' || q.question_type === 'short_answer') {
                     if (
-                        String(studentAns).trim().toLowerCase() ===
-                        String(correct.answer).trim().toLowerCase()
+                        String(studentAns || '').toLowerCase() ===
+                        String(correctAns.answer || '').toLowerCase()
                     ) {
-                        score += q.points;
+                        totalScore += q.points;
                     }
+                }
+                // true_false: chấm theo số mệnh đề đúng (4 → 1đ, 3 → 0.5, 2 → 0.25, 1 → 0.1)
+                else if (q.question_type === 'true_false') {
+                    let correctTfCount = 0;
+                    if (correctAns) {
+                        Object.keys(correctAns).forEach(key => {
+                            if (studentAns[key] && studentAns[key] === correctAns[key]) {
+                                correctTfCount++;
+                            }
+                        });
+                    }
+                    if (correctTfCount === 4) totalScore += 1.0;
+                    else if (correctTfCount === 3) totalScore += 0.5;
+                    else if (correctTfCount === 2) totalScore += 0.25;
+                    else if (correctTfCount === 1) totalScore += 0.1;
                 }
             });
 
