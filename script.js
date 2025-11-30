@@ -32,11 +32,20 @@ document.addEventListener('DOMContentLoaded', function() {
         currentUser = session?.user || null;
 
         if (currentUser) {
-            // Kiểm tra xem hiện tại đã có view nào đang active chưa
             const activeView = document.querySelector('.view.active-view');
-            if (!activeView) {
+            const activeId = activeView ? activeView.id : null;
+
+            // Nếu chưa có view, hoặc đang ở trang login / chọn vai trò
+            // => sau khi đăng nhập thì đưa vào portal học sinh
+            if (
+                !activeView ||
+                activeId === 'login-view' ||
+                activeId === 'role-selection-view'
+            ) {
                 showStudentPortal();
             }
+            // Còn nếu đang ở exam-taking-view, student-review-view,... thì giữ nguyên,
+            // không chuyển view (để tránh đang làm bài bị đá ra ngoài)
         } else {
             // Người dùng đã đăng xuất hoặc chưa đăng nhập
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active-view'));
